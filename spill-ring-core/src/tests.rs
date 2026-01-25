@@ -518,6 +518,37 @@ fn iter_mut_size_hint() {
     assert_eq!(iter.size_hint(), (3, Some(3)));
 }
 
+#[test]
+fn drain_removes_all_items() {
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
+    ring.push(1);
+    ring.push(2);
+    ring.push(3);
+
+    let drained: Vec<_> = ring.drain().collect();
+    assert_eq!(drained, vec![1, 2, 3]);
+    assert!(ring.is_empty());
+}
+
+#[test]
+fn extend_adds_items() {
+    let mut ring: SpillRing<i32, 8> = SpillRing::new();
+    ring.extend([1, 2, 3]);
+    assert_eq!(ring.len(), 3);
+    assert_eq!(ring.pop(), Some(1));
+    assert_eq!(ring.pop(), Some(2));
+    assert_eq!(ring.pop(), Some(3));
+}
+
+#[test]
+fn extend_with_overflow_evicts() {
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
+    ring.extend(0..10);
+    // Only last 4 items remain (6, 7, 8, 9)
+    assert_eq!(ring.len(), 4);
+    assert_eq!(ring.pop(), Some(6));
+}
+
 // Concurrency tests (only run with atomics feature)
 // SpillRing is SPSC (single-producer, single-consumer) safe with atomics.
 #[cfg(not(feature = "no-atomics"))]

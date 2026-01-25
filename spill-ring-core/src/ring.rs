@@ -454,6 +454,43 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
     pub fn iter_mut(&mut self) -> SpillRingIterMut<'_, T, N, S> {
         SpillRingIterMut::new(self)
     }
+
+    /// Drain all items from the ring, returning an iterator.
+    /// Items are removed oldest to newest.
+    #[inline]
+    pub fn drain(&mut self) -> Drain<'_, T, N, S> {
+        Drain { ring: self }
+    }
+}
+
+/// Draining iterator over a SpillRing.
+pub struct Drain<'a, T, const N: usize, S: Sink<T>> {
+    ring: &'a mut SpillRing<T, N, S>,
+}
+
+impl<T, const N: usize, S: Sink<T>> Iterator for Drain<'_, T, N, S> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        self.ring.pop()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.ring.len();
+        (len, Some(len))
+    }
+}
+
+impl<T, const N: usize, S: Sink<T>> ExactSizeIterator for Drain<'_, T, N, S> {}
+
+impl<T, const N: usize, S: Sink<T>> core::iter::Extend<T> for SpillRing<T, N, S> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
+    }
 }
 
 impl<T, const N: usize> Default for SpillRing<T, N, DropSink> {

@@ -129,7 +129,11 @@ macro_rules! impl_bytes_for_int {
                             available: buf.len(),
                         });
                     }
-                    let bytes: [u8; SIZE] = buf[..SIZE].try_into().unwrap();
+                    // SAFETY: We verified buf.len() >= SIZE above, so this slice
+                    // is exactly SIZE bytes and try_into() cannot fail.
+                    let Ok(bytes) = buf[..SIZE].try_into() else {
+                        unreachable!()
+                    };
                     Ok((<$ty>::from_le_bytes(bytes), SIZE))
                 }
             }

@@ -180,3 +180,60 @@ fn test_usize_portability() {
     assert_eq!(v, value);
     assert_eq!(n, 8);
 }
+
+#[test]
+fn test_isize_portability() {
+    // isize serializes as i64 for cross-platform compatibility
+    let mut buf = [0u8; 8];
+    let value: isize = -12345;
+
+    assert_eq!(value.to_bytes(&mut buf).unwrap(), 8);
+    let (v, n) = isize::from_bytes(&buf).unwrap();
+    assert_eq!(v, value);
+    assert_eq!(n, 8);
+}
+
+// ByteSerializer tests
+
+use super::ByteSerializer;
+
+#[test]
+fn test_byte_serializer_new() {
+    let _serializer = ByteSerializer::new();
+    let _default = ByteSerializer::default();
+}
+
+#[test]
+fn test_byte_serializer_roundtrip_u32() {
+    let serializer = ByteSerializer::new();
+    let value = 0x12345678u32;
+
+    let bytes = serializer.serialize(&value).unwrap();
+    assert_eq!(bytes.len(), 4);
+
+    let result: u32 = serializer.deserialize(&bytes).unwrap();
+    assert_eq!(result, value);
+}
+
+#[test]
+fn test_byte_serializer_roundtrip_u64() {
+    let serializer = ByteSerializer::new();
+    let value = 0x123456789ABCDEF0u64;
+
+    let bytes = serializer.serialize(&value).unwrap();
+    assert_eq!(bytes.len(), 8);
+
+    let result: u64 = serializer.deserialize(&bytes).unwrap();
+    assert_eq!(result, value);
+}
+
+#[test]
+fn test_byte_serializer_roundtrip_bool() {
+    let serializer = ByteSerializer::new();
+
+    let bytes_true = serializer.serialize(&true).unwrap();
+    let bytes_false = serializer.serialize(&false).unwrap();
+
+    assert_eq!(serializer.deserialize::<bool>(&bytes_true).unwrap(), true);
+    assert_eq!(serializer.deserialize::<bool>(&bytes_false).unwrap(), false);
+}

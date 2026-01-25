@@ -1,4 +1,4 @@
-use crate::{DropSink, FnSink, SpillRing, Sink};
+use crate::{DropSink, FnSink, Sink, SpillRing, sink};
 
 extern crate std;
 use std::{vec, vec::Vec};
@@ -368,4 +368,152 @@ fn sink_with_different_types() {
     tuple_sink.send((1, "a"));
     tuple_sink.send((2, "b"));
     assert_eq!(tuple_sink.items, vec![(1, "a"), (2, "b")]);
+}
+
+#[test]
+fn fn_flush_sink_calls_both_closures() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static SEND_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static FLUSH_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    SEND_COUNT.store(0, Ordering::SeqCst);
+    FLUSH_COUNT.store(0, Ordering::SeqCst);
+
+    let mut s = sink(
+        |_: i32| {
+            SEND_COUNT.fetch_add(1, Ordering::SeqCst);
+        },
+        || {
+            FLUSH_COUNT.fetch_add(1, Ordering::SeqCst);
+        },
+    );
+
+    s.send(1);
+    s.send(2);
+    s.send(3);
+    assert_eq!(SEND_COUNT.load(Ordering::SeqCst), 3);
+    assert_eq!(FLUSH_COUNT.load(Ordering::SeqCst), 0);
+
+    s.flush();
+    assert_eq!(FLUSH_COUNT.load(Ordering::SeqCst), 1);
+
+    s.flush();
+    assert_eq!(FLUSH_COUNT.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn fn_flush_sink_with_unit_flush() {
+    let mut collected = Vec::new();
+    {
+        // Using () for flush (no-op)
+        let mut s = sink(|x: i32| collected.push(x), ());
+        s.send(10);
+        s.send(20);
+        s.flush(); // Should be a no-op
+    }
+    assert_eq!(collected, vec![10, 20]);
+}
+
+#[test]
+fn drop_sink_flush_is_noop() {
+    let mut s = DropSink;
+    <DropSink as Sink<i32>>::flush(&mut s); // Should not panic
+}
+
+#[test]
+fn clear_flushes_to_sink() {
+    let sink = CollectSink::new();
+    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+
+    ring.push(1);
+    ring.push(2);
+    ring.push(3);
+
+    ring.clear();
+
+    assert!(ring.is_empty());
+    assert_eq!(ring.sink().items, vec![1, 2, 3]);
+}
+
+#[test]
+fn default_creates_empty_ring() {
+    let ring: SpillRing<i32, 4> = SpillRing::default();
+    assert!(ring.is_empty());
+    assert_eq!(ring.capacity(), 4);
+}
+
+// Test trait implementations
+use crate::traits::{RingConsumer, RingProducer};
+
+#[test]
+fn ring_producer_trait() {
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
+
+    // try_push
+    assert!(RingProducer::try_push(&mut ring, 1).is_ok());
+    assert!(RingProducer::try_push(&mut ring, 2).is_ok());
+    assert!(RingProducer::try_push(&mut ring, 3).is_ok());
+    assert!(RingProducer::try_push(&mut ring, 4).is_ok());
+
+    // is_full
+    assert!(RingProducer::is_full(&ring));
+
+    // try_push when full returns Err
+    assert_eq!(RingProducer::try_push(&mut ring, 5), Err(5));
+
+    // capacity, len, is_empty
+    assert_eq!(RingProducer::capacity(&ring), 4);
+    assert_eq!(RingProducer::len(&ring), 4);
+    assert!(!RingProducer::is_empty(&ring));
+}
+
+#[test]
+fn ring_consumer_trait() {
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
+    ring.push(10);
+    ring.push(20);
+
+    // peek
+    assert_eq!(RingConsumer::peek(&ring), Some(&10));
+
+    // try_pop
+    assert_eq!(RingConsumer::try_pop(&mut ring), Some(10));
+    assert_eq!(RingConsumer::try_pop(&mut ring), Some(20));
+    assert_eq!(RingConsumer::try_pop(&mut ring), None);
+
+    // is_empty, len, capacity
+    assert!(RingConsumer::is_empty(&ring));
+    assert_eq!(RingConsumer::len(&ring), 0);
+    assert_eq!(RingConsumer::capacity(&ring), 4);
+}
+
+#[test]
+fn iter_nth() {
+    let ring: SpillRing<i32, 8> = SpillRing::new();
+    ring.push(10);
+    ring.push(20);
+    ring.push(30);
+    ring.push(40);
+    ring.push(50);
+
+    let mut iter = ring.iter();
+
+    // Skip 2, get 3rd element
+    assert_eq!(iter.nth(2), Some(&30));
+    // Next after nth should be 4th element
+    assert_eq!(iter.next(), Some(&40));
+    // nth beyond remaining
+    assert_eq!(iter.nth(10), None);
+}
+
+#[test]
+fn iter_mut_size_hint() {
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
+    ring.push(1);
+    ring.push(2);
+    ring.push(3);
+
+    let iter = ring.iter_mut();
+    assert_eq!(iter.size_hint(), (3, Some(3)));
 }

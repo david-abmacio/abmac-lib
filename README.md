@@ -116,6 +116,46 @@ thread::spawn(move || {
 
 For multiple producers or multiple consumers, wrap in a `Mutex`.
 
+## Performance
+
+SpillRing has two modes with different performance characteristics.
+
+**Benchmarks** (AMD Ryzen 7 7840U, Linux 6.18, Rust 1.85):
+
+| Mode | Push Throughput | Use Case |
+|------|-----------------|----------|
+| Default (atomics) | 193 Melem/s | SPSC concurrent access |
+| `no-atomics` feature | 4.6 Gelem/s | Single-threaded |
+
+The default mode uses atomic operations and a seqlock for thread-safe SPSC access. This adds overhead compared to single-threaded use.
+
+For single-threaded applications, enable `no-atomics` for ~20x better throughput:
+
+```toml
+[dependencies]
+spill-ring = { version = "0.1", features = ["no-atomics"] }
+```
+
+**Comparison to VecDeque:**
+
+| Implementation | Push Throughput |
+|----------------|-----------------|
+| SpillRing (no-atomics) | 4.6 Gelem/s |
+| VecDeque (manual eviction) | 632 Melem/s |
+| SpillRing (atomics) | 193 Melem/s |
+
+SpillRing's power-of-two capacity enables fast bitwise modulo, making the `no-atomics` version faster than `VecDeque` with equivalent eviction logic.
+
+**Cache effects** (50k push operations):
+
+| Capacity | Throughput | Notes |
+|----------|------------|-------|
+| 16 | 192 Melem/s | Fits L1 cache |
+| 4096 | 177 Melem/s | L2 cache |
+| 65536 | 141 Melem/s | L3 cache |
+
+Run benchmarks locally: `cargo bench`
+
 ## Custom Sinks
 
 Implement `Sink` to control where evicted items go:

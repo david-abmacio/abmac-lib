@@ -23,3 +23,20 @@ spill-ring-core = { path = "spill-ring-core" }
 spill-ring-macros = { path = "spill-ring-macros", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "spsc"
+harness = false
+
+[[bench]]
+name = "comparison"
+harness = false

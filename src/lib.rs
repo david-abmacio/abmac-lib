@@ -10,9 +10,8 @@ pub use spill_ring_macros::{FromBytes, ToBytes};
 /// Prelude for convenient imports.
 pub mod prelude {
     pub use crate::{
-        ByteSerializer, BytesError, FromBytes, ToBytes, ViewBytes,
-        SpillRing, SpillRingIter, SpillRingIterMut,
-        Sink, DropSink, FnSink, FnFlushSink, Flush, sink,
-        RingProducer, RingConsumer, RingTrait,
+        ByteSerializer, BytesError, CollectSink, DropSink, Flush, FnFlushSink, FnSink, FromBytes,
+        RingConsumer, RingProducer, RingTrait, Sink, SpillRing, SpillRingIter, SpillRingIterMut,
+        ToBytes, ViewBytes, sink,
     };
 }

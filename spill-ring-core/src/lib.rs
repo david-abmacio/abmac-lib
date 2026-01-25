@@ -16,5 +16,5 @@ mod tests;
 pub use bytes::{ByteSerializer, BytesError, FromBytes, ToBytes, ViewBytes};
 pub use iter::{SpillRingIter, SpillRingIterMut};
 pub use ring::SpillRing;
-pub use sink::{sink, DropSink, Flush, FnFlushSink, FnSink, Sink};
+pub use sink::{CollectSink, DropSink, Flush, FnFlushSink, FnSink, Sink, sink};
 pub use traits::{RingConsumer, RingProducer, RingTrait};

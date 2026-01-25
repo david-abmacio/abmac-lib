@@ -1,5 +1,9 @@
 //! Sink traits and implementations.
 
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 /// Consumes items.
 pub trait Sink<T> {
     /// Consume an item.
@@ -17,6 +21,41 @@ pub struct DropSink;
 impl<T> Sink<T> for DropSink {
     #[inline]
     fn send(&mut self, _item: T) {}
+}
+
+/// Collects evicted items into a Vec.
+#[derive(Debug, Clone, Default)]
+pub struct CollectSink<T> {
+    items: Vec<T>,
+}
+
+impl<T> CollectSink<T> {
+    /// Create a new collecting sink.
+    pub fn new() -> Self {
+        Self { items: Vec::new() }
+    }
+
+    /// Get collected items.
+    pub fn items(&self) -> &[T] {
+        &self.items
+    }
+
+    /// Take collected items, leaving an empty Vec.
+    pub fn take(&mut self) -> Vec<T> {
+        core::mem::take(&mut self.items)
+    }
+
+    /// Consume sink and return collected items.
+    pub fn into_items(self) -> Vec<T> {
+        self.items
+    }
+}
+
+impl<T> Sink<T> for CollectSink<T> {
+    #[inline]
+    fn send(&mut self, item: T) {
+        self.items.push(item);
+    }
 }
 
 /// Calls a closure for each item.

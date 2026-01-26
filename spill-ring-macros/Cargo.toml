@@ -1,9 +1,13 @@
 [package]
 name = "spill-ring-macros"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Derive macros for spill_ring"
+description = "Derive macros (ToBytes, FromBytes) for spill-ring serialization"
+repository = "https://github.com/GregBowyer/spill_ring"
+keywords = ["derive", "serialization", "no_std", "macros"]
+categories = ["development-tools::procedural-macro-helpers", "no-std"]
 
 [lib]
 proc-macro = true

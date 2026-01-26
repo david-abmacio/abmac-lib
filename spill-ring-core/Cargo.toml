@@ -1,9 +1,13 @@
 [package]
 name = "spill-ring-core"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Core implementation for spill_ring"
+description = "Core no_std ring buffer with overflow-to-sink semantics"
+repository = "https://github.com/GregBowyer/spill_ring"
+keywords = ["ring-buffer", "no_std", "embedded", "lock-free"]
+categories = ["data-structures", "no-std", "embedded"]
 
 [features]
 default = []

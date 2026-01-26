@@ -1121,7 +1121,7 @@ dependencies = [
 
 [[package]]
 name = "spill-ring"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "compio",
  "criterion",
@@ -1132,14 +1132,14 @@ dependencies = [
 
 [[package]]
 name = "spill-ring-core"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "snafu",
 ]
 
 [[package]]
 name = "spill-ring-macros"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "proc-macro2",
  "quote",

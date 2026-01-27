@@ -215,8 +215,9 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
             unsafe { self.sink.get_mut_unchecked().send(evicted) };
         }
 
-        // Write item
-        unsafe { (*self.buffer[idx].data.get()).write(item) };
+        // Write item - use black_box to prevent the compiler from optimizing away
+        // the write when called across library boundaries
+        unsafe { (*self.buffer[idx].data.get()).write(core::hint::black_box(item)) };
         self.tail.store(tail.wrapping_add(1));
     }
 

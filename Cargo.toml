@@ -3,7 +3,7 @@ members = [".", "spill-ring-core", "spill-ring-macros"]
 
 [package]
 name = "spill-ring"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -20,8 +20,8 @@ atomics = ["spill-ring-core/atomics"]
 macros = ["spill-ring-macros"]
 
 [dependencies]
-spill-ring-core = { path = "spill-ring-core", version = "1.0.0-rc.1" }
-spill-ring-macros = { path = "spill-ring-macros", version = "1.0.0-rc.1", optional = true }
+spill-ring-core = { path = "spill-ring-core", version = "1.0.0-rc.2" }
+spill-ring-macros = { path = "spill-ring-macros", version = "1.0.0-rc.2", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -48,6 +48,7 @@ harness = false
 [[bench]]
 name = "mpsc"
 harness = false
+required-features = ["std"]
 
 [[example]]
 name = "compio_file_copy"

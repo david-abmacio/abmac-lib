@@ -4,6 +4,9 @@
 
 pub use spill_ring_core::*;
 
+#[cfg(feature = "std")]
+pub use spill_ring_core::WorkerPool;
+
 #[cfg(feature = "macros")]
 pub use spill_ring_macros::{FromBytes, ToBytes};
 

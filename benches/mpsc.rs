@@ -4,9 +4,7 @@
 //! Runs with the default (non-atomic) configuration for maximum performance.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use spill_ring::{
-    CollectSink, DropSink, MpscRing, ProducerSink, RingInfo, Sink, SpillRing, collect_producers,
-};
+use spill_ring::{CollectSink, DropSink, MpscRing, ProducerSink, Sink, SpillRing, collect};
 use std::{
     sync::{
         Arc,
@@ -29,7 +27,8 @@ fn mpsc_throughput(c: &mut Criterion) {
             &num_producers,
             |b, &n| {
                 b.iter(|| {
-                    let (producers, consumer) = MpscRing::<u64, 1024>::new(n);
+                    // Simple API - just measure push throughput
+                    let producers = MpscRing::<u64, 1024>::new(n);
 
                     thread::scope(|s| {
                         for producer in producers {
@@ -37,14 +36,12 @@ fn mpsc_throughput(c: &mut Criterion) {
                                 for i in 0..iterations_per_producer {
                                     producer.push(black_box(i));
                                 }
-                                producer // Return for collection
+                                // Producer drops here
                             });
                         }
                     });
 
-                    // Note: In real usage, you'd collect producers back
-                    // For benchmark, we just measure the push throughput
-                    black_box(consumer.num_producers())
+                    black_box(n)
                 })
             },
         );
@@ -66,9 +63,9 @@ fn mpsc_full_cycle(c: &mut Criterion) {
             &num_producers,
             |b, &n| {
                 b.iter(|| {
-                    let (producers, mut consumer) = MpscRing::<u64, 1024>::new(n);
+                    let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(n);
 
-                    let finished_producers: Vec<_> = thread::scope(|s| {
+                    let finished: Vec<_> = thread::scope(|s| {
                         producers
                             .into_iter()
                             .map(|producer| {
@@ -85,7 +82,7 @@ fn mpsc_full_cycle(c: &mut Criterion) {
                             .collect()
                     });
 
-                    collect_producers(finished_producers, &mut consumer);
+                    collect(finished, &mut consumer);
                     let mut sink = CollectSink::new();
                     consumer.drain(&mut sink);
                     black_box(sink.into_items().len())
@@ -117,7 +114,7 @@ fn mpsc_vs_single(c: &mut Criterion) {
     // MPSC with 4 producers (50k each)
     group.bench_function("mpsc_4_producers", |b| {
         b.iter(|| {
-            let (producers, mut consumer) = MpscRing::<u64, 1024>::new(4);
+            let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(4);
             let per_producer = total_items / 4;
 
             let finished: Vec<_> = thread::scope(|s| {
@@ -137,7 +134,7 @@ fn mpsc_vs_single(c: &mut Criterion) {
                     .collect()
             });
 
-            collect_producers(finished, &mut consumer);
+            collect(finished, &mut consumer);
             let mut sink = CollectSink::new();
             consumer.drain(&mut sink);
             black_box(sink.into_items().len())
@@ -163,7 +160,7 @@ fn mpsc_scaling(c: &mut Criterion) {
             &num_producers,
             |b, &n| {
                 b.iter(|| {
-                    let (producers, mut consumer) = MpscRing::<u64, 2048>::new(n);
+                    let (producers, mut consumer) = MpscRing::<u64, 2048>::with_consumer(n);
 
                     let finished: Vec<_> = thread::scope(|s| {
                         producers
@@ -182,7 +179,7 @@ fn mpsc_scaling(c: &mut Criterion) {
                             .collect()
                     });
 
-                    collect_producers(finished, &mut consumer);
+                    collect(finished, &mut consumer);
                     black_box(consumer.len())
                 })
             },
@@ -200,34 +197,24 @@ fn producer_sink_overhead(c: &mut Criterion) {
     let total = iterations_per_producer * num_producers as u64;
     group.throughput(Throughput::Elements(total));
 
-    // Using ProducerSink helper
+    // Using ProducerSink helper - sinks auto-flush on drop, no manual drain needed
     group.bench_function("producer_sink", |b| {
         b.iter(|| {
             let sink = ProducerSink::new(|_id| CollectSink::<u64>::new());
-            let (producers, mut consumer) =
-                MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
+            let producers = MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
 
-            let finished: Vec<_> = thread::scope(|s| {
-                producers
-                    .into_iter()
-                    .map(|producer| {
-                        s.spawn(move || {
-                            for i in 0..iterations_per_producer {
-                                producer.push(black_box(i));
-                            }
-                            producer
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect()
+            thread::scope(|s| {
+                for producer in producers {
+                    s.spawn(move || {
+                        for i in 0..iterations_per_producer {
+                            producer.push(black_box(i));
+                        }
+                        // Producer drops here, flushes to sink
+                    });
+                }
             });
 
-            collect_producers(finished, &mut consumer);
-            let count = consumer.len();
-            consumer.drain(&mut DropSink);
-            black_box(count)
+            black_box(num_producers)
         })
     });
 
@@ -271,37 +258,27 @@ fn producer_sink_overhead(c: &mut Criterion) {
                 producer_id: 0,
                 next_id: Arc::new(AtomicUsize::new(0)),
             };
-            let (producers, mut consumer) =
-                MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
+            let producers = MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
 
-            let finished: Vec<_> = thread::scope(|s| {
-                producers
-                    .into_iter()
-                    .map(|producer| {
-                        s.spawn(move || {
-                            for i in 0..iterations_per_producer {
-                                producer.push(black_box(i));
-                            }
-                            producer
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect()
+            thread::scope(|s| {
+                for producer in producers {
+                    s.spawn(move || {
+                        for i in 0..iterations_per_producer {
+                            producer.push(black_box(i));
+                        }
+                        // Producer drops here, flushes to sink
+                    });
+                }
             });
 
-            collect_producers(finished, &mut consumer);
-            let count = consumer.len();
-            consumer.drain(&mut DropSink);
-            black_box(count)
+            black_box(num_producers)
         })
     });
 
-    // No sink (DropSink) baseline
+    // No sink (DropSink) baseline - using with_consumer for manual drain
     group.bench_function("drop_sink", |b| {
         b.iter(|| {
-            let (producers, mut consumer) = MpscRing::<u64, 1024>::new(num_producers);
+            let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(num_producers);
 
             let finished: Vec<_> = thread::scope(|s| {
                 producers
@@ -320,7 +297,7 @@ fn producer_sink_overhead(c: &mut Criterion) {
                     .collect()
             });
 
-            collect_producers(finished, &mut consumer);
+            collect(finished, &mut consumer);
             let count = consumer.len();
             consumer.drain(&mut DropSink);
             black_box(count)

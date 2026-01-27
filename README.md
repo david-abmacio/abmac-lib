@@ -125,10 +125,10 @@ When order between producers doesn't matter, `MpscRing` provides zero-overhead m
 
 ```rust
 use std::thread;
-use spill_ring::{MpscRing, collect_producers};
+use spill_ring::{MpscRing, CollectSink, collect};
 
 // Create 4 producers and a consumer
-let (producers, mut consumer) = MpscRing::<u64, 1024>::new(4);
+let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(4);
 
 // Each producer runs on its own thread at full speed
 let finished: Vec<_> = thread::scope(|s| {
@@ -149,7 +149,7 @@ let finished: Vec<_> = thread::scope(|s| {
 });
 
 // Merge producers back and drain all items
-collect_producers(finished, &mut consumer);
+collect(finished, &mut consumer);
 let mut sink = CollectSink::new();
 consumer.drain(&mut sink);
 // Process items (order across producers not guaranteed)

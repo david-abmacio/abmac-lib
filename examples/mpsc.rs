@@ -1,11 +1,11 @@
 //! MPSC example: Multiple producers write sensor data, merged and flushed to file.
 //!
 //! Demonstrates zero-overhead MPSC with file I/O and checksum verification.
-//! Each producer runs independently at full speed, data merges on the cold path.
+//! Each producer runs independently at full speed, data flushes to shared sink.
 //!
-//! Run with: cargo run --example mpsc_file_sink
+//! Run with: cargo run --example mpsc
 
-use spill_ring::{MpscRing, Sink, collect_producers};
+use spill_ring::{MpscRing, Sink};
 use std::{
     fs::File,
     hash::{DefaultHasher, Hash, Hasher},
@@ -116,13 +116,12 @@ fn main() -> std::io::Result<()> {
     );
     println!();
 
-    // Create shared sink for evictions
+    // Create shared sink for evictions - all producers write to same file
     let sink = SharedFileSink::new("mpsc_output.bin", NUM_PRODUCERS)?;
     let sink_ref = sink.clone();
 
     // Create MPSC ring - each producer gets a clone of the sink
-    let (producers, mut consumer) =
-        MpscRing::<SensorReading, RING_CAPACITY, _>::with_sink(NUM_PRODUCERS, sink);
+    let producers = MpscRing::<SensorReading, RING_CAPACITY, _>::with_sink(NUM_PRODUCERS, sink);
 
     // Track input checksums per-producer (order within producer is preserved)
     let input_checksums: Vec<Arc<AtomicU64>> = (0..NUM_PRODUCERS)
@@ -130,41 +129,30 @@ fn main() -> std::io::Result<()> {
         .collect();
 
     // Spawn producers - each runs at full no-atomics speed
-    let finished_producers: Vec<_> = thread::scope(|s| {
-        producers
-            .into_iter()
-            .enumerate()
-            .map(|(producer_id, producer)| {
-                let checksum_slot = Arc::clone(&input_checksums[producer_id]);
-                s.spawn(move || {
-                    let mut hasher = DefaultHasher::new();
+    // Items flush to shared sink on overflow and when producer drops
+    thread::scope(|s| {
+        for (producer_id, producer) in producers.into_iter().enumerate() {
+            let checksum_slot = Arc::clone(&input_checksums[producer_id]);
+            s.spawn(move || {
+                let mut hasher = DefaultHasher::new();
 
-                    for i in 0..READINGS_PER_PRODUCER {
-                        let reading = SensorReading {
-                            timestamp: i,
-                            sensor_id: producer_id as u32,
-                            value: (i as f64 + producer_id as f64).sin(),
-                        };
-                        reading.hash_into(&mut hasher);
-                        producer.push(reading);
-                    }
+                for i in 0..READINGS_PER_PRODUCER {
+                    let reading = SensorReading {
+                        timestamp: i,
+                        sensor_id: producer_id as u32,
+                        value: (i as f64 + producer_id as f64).sin(),
+                    };
+                    reading.hash_into(&mut hasher);
+                    producer.push(reading);
+                }
 
-                    // Store this producer's checksum
-                    checksum_slot.store(hasher.finish(), Ordering::Relaxed);
-                    producer
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect()
+                // Store this producer's checksum
+                checksum_slot.store(hasher.finish(), Ordering::Relaxed);
+                // Producer drops here, remaining items flush to sink
+            });
+        }
     });
 
-    // Collect producers back to consumer (cold path)
-    collect_producers(finished_producers, &mut consumer);
-
-    // Drain remaining items (what's left in rings) through the shared sink
-    consumer.drain(&mut sink_ref.clone());
     sink_ref.flush_inner();
 
     println!("Results:");

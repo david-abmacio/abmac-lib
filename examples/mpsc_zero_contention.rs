@@ -5,7 +5,7 @@
 //!
 //! Run with: cargo run --example mpsc_zero_contention
 
-use spill_ring::{FnFlushSink, FnSink, MpscRing, ProducerSink, collect_producers};
+use spill_ring::{FnFlushSink, MpscRing, ProducerSink};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -62,52 +62,25 @@ fn main() -> std::io::Result<()> {
     });
 
     // Create MPSC ring - each producer gets its own file sink
-    let (producers, mut consumer) =
-        MpscRing::<SensorReading, RING_CAPACITY, _>::with_sink(NUM_PRODUCERS, sink);
+    let producers = MpscRing::<SensorReading, RING_CAPACITY, _>::with_sink(NUM_PRODUCERS, sink);
 
     // Spawn producers - each has its own file sink, zero contention
-    let finished_producers: Vec<_> = thread::scope(|s| {
-        producers
-            .into_iter()
-            .enumerate()
-            .map(|(producer_id, producer)| {
-                s.spawn(move || {
-                    for i in 0..READINGS_PER_PRODUCER {
-                        let reading = SensorReading {
-                            timestamp: i,
-                            sensor_id: producer_id as u32,
-                            value: (i as f64 + producer_id as f64).sin(),
-                        };
-                        producer.push(reading);
-                    }
-                    producer
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect()
+    // Items flush to per-producer files on overflow and when producer drops
+    thread::scope(|s| {
+        for (producer_id, producer) in producers.into_iter().enumerate() {
+            s.spawn(move || {
+                for i in 0..READINGS_PER_PRODUCER {
+                    let reading = SensorReading {
+                        timestamp: i,
+                        sensor_id: producer_id as u32,
+                        value: (i as f64 + producer_id as f64).sin(),
+                    };
+                    producer.push(reading);
+                }
+                // Producer drops here, remaining items flush to its file
+            });
+        }
     });
-
-    // Collect producers back
-    collect_producers(finished_producers, &mut consumer);
-
-    // Drain remaining items (what's left in each ring after producers finish)
-    let mut drain_counts: Vec<u64> = vec![0; NUM_PRODUCERS];
-
-    // Write drained items to a merge file
-    let mut merge_file = BufWriter::new(File::create("mpsc_merged.bin")?);
-
-    let mut drain_sink = FnSink(|item: SensorReading| {
-        let pid = item.sensor_id as usize;
-        merge_file.write_all(&item.to_bytes()).unwrap();
-        drain_counts[pid] += 1;
-    });
-    consumer.drain(&mut drain_sink);
-    merge_file.flush()?;
-
-    // Drop consumer to flush all sinks' BufWriters
-    drop(consumer);
 
     println!("Results:");
     println!("  Items generated: {}", TOTAL_READINGS);
@@ -118,17 +91,16 @@ fn main() -> std::io::Result<()> {
     let mut all_match = true;
     let mut total_from_files = 0u64;
 
-    for (pid, &drained) in drain_counts.iter().enumerate() {
-        let eviction_path = format!("mpsc_producer_{}.bin", pid);
-        let eviction_count = std::fs::read(&eviction_path)
+    for pid in 0..NUM_PRODUCERS {
+        let path = format!("mpsc_producer_{}.bin", pid);
+        let count = std::fs::read(&path)
             .map(|data| (data.len() / 20) as u64)
             .unwrap_or(0);
 
-        let total_for_producer = eviction_count + drained;
-        total_from_files += total_for_producer;
+        total_from_files += count;
 
         let expected = READINGS_PER_PRODUCER;
-        let status = if total_for_producer == expected {
+        let status = if count == expected {
             "PASS"
         } else {
             all_match = false;
@@ -136,12 +108,12 @@ fn main() -> std::io::Result<()> {
         };
 
         println!(
-            "  Producer {}: evicted={}, drained={}, total={} (expected {}) [{}]",
-            pid, eviction_count, drained, total_for_producer, expected, status
+            "  Producer {}: {} items (expected {}) [{}]",
+            pid, count, expected, status
         );
 
         // Cleanup producer file
-        let _ = std::fs::remove_file(&eviction_path);
+        let _ = std::fs::remove_file(&path);
     }
 
     println!();
@@ -158,9 +130,6 @@ fn main() -> std::io::Result<()> {
         println!("Overall Status: FAIL - item count mismatch!");
         std::process::exit(1);
     }
-
-    // Cleanup
-    std::fs::remove_file("mpsc_merged.bin")?;
 
     Ok(())
 }

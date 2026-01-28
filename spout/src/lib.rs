@@ -1,5 +1,8 @@
 extern crate alloc;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "std")]
 use std::sync::mpsc;
 

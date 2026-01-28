@@ -1,7 +1,6 @@
-mod producer_sink;
 mod ring;
 mod ring_chaining;
-mod sink;
+mod spout;
 mod traits;
 
 #[cfg(feature = "atomics")]

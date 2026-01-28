@@ -2,7 +2,8 @@ extern crate std;
 
 use std::{vec, vec::Vec};
 
-use crate::{CollectSink, SpillRing};
+use crate::SpillRing;
+use spout::{CollectSink, Sink};
 
 #[test]
 fn new_ring_is_empty() {
@@ -172,7 +173,7 @@ fn drop_flushes_to_sink() {
     static SINK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     struct CountingSink;
-    impl crate::Sink<i32> for CountingSink {
+    impl spout::Sink<i32> for CountingSink {
         fn send(&mut self, _item: i32) {
             SINK_COUNT.fetch_add(1, Ordering::SeqCst);
         }
@@ -254,7 +255,7 @@ fn clear_drop_ignores_sink() {
     static SINK_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     struct CountingSink;
-    impl crate::Sink<i32> for CountingSink {
+    impl spout::Sink<i32> for CountingSink {
         fn send(&mut self, _item: i32) {
             SINK_COUNT.fetch_add(1, Ordering::SeqCst);
         }

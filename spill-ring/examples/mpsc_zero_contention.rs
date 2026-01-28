@@ -5,7 +5,8 @@
 //!
 //! Run with: cargo run --example mpsc_zero_contention
 
-use spill_ring::{FnFlushSink, MpscRing, ProducerSink};
+use spill_ring::MpscRing;
+use spout::{FnFlushSink, ProducerSink};
 use std::{
     fs::File,
     io::{BufWriter, Write},

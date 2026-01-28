@@ -41,7 +41,8 @@ fn batch_sink_with_ring_chain() {
 
 #[cfg(feature = "std")]
 mod channel_sink_tests {
-    use crate::{ChannelSink, Sink, SpillRing};
+    use crate::SpillRing;
+    use spout::{ChannelSink, Sink};
     use std::sync::mpsc;
 
     #[test]

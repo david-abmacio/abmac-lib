@@ -12,14 +12,13 @@ mod traits;
 #[cfg(test)]
 mod tests;
 
-pub use bytecast::{ByteSerializer, BytesError, FromBytes, ToBytes, ViewBytes};
-pub use spout::{
-    BatchSink, CollectSink, DropSink, Flush, FnFlushSink, FnSink, ProducerSink, ReduceSink, Sink,
-    sink,
-};
-
-#[cfg(feature = "std")]
-pub use spout::ChannelSink;
+//pub use spout::{
+//    BatchSink, CollectSink, DropSink, Flush, FnFlushSink, FnSink, ProducerSink, ReduceSink, Sink,
+//    sink,
+//};
+//
+//#[cfg(feature = "std")]
+//pub use spout::ChannelSink;
 
 pub use iter::{SpillRingIter, SpillRingIterMut};
 #[cfg(feature = "std")]

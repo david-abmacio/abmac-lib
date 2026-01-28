@@ -29,8 +29,10 @@
 
 extern crate alloc;
 
-use crate::{DropSink, Sink, SpillRing};
+use crate::SpillRing;
+
 use alloc::vec::Vec;
+use spout::{DropSink, Sink};
 
 /// A producer handle for an MPSC ring.
 ///
@@ -469,7 +471,7 @@ pub use worker_pool::WorkerPool;
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use crate::CollectSink;
+    use spout::CollectSink;
     use std::sync::{Arc, Mutex};
     use std::vec;
 

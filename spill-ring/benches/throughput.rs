@@ -1,7 +1,8 @@
 //! Throughput benchmarks - ops/sec for push and pop operations.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use spill_ring::{CollectSink, DropSink, SpillRing};
+use spill_ring::SpillRing;
+use spout::{CollectSink, DropSink};
 
 /// Benchmark push throughput with DropSink (items discarded on eviction).
 fn push_throughput_drop_sink(c: &mut Criterion) {

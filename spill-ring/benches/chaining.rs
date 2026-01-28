@@ -4,7 +4,8 @@
 //! of tiered buffering.
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use spill_ring::{BatchSink, CollectSink, DropSink, ReduceSink, SpillRing};
+use spill_ring::SpillRing;
+use spout::{BatchSink, CollectSink, DropSink, ReduceSink};
 
 /// Compare single ring vs chained rings - no overflow case.
 /// When items stay in the first ring, chaining should have zero overhead.

@@ -2,7 +2,8 @@ extern crate std;
 
 use std::vec;
 
-use crate::{CollectSink, FnSink, SpillRing};
+use crate::SpillRing;
+use spout::{CollectSink, FnSink};
 
 #[test]
 fn ring_chaining_basic() {

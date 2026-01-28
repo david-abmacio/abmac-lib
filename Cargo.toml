@@ -1,8 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["spout", "spill-ring", "spill-ring-macros"]
+members = ["bytecast", "bytecast-macros", "spout", "spill-ring"]
 
 [workspace.package]
 
 [workspace.dependencies]
 spout = { path = "./spout" }
+bytecast = { path = "./bytecast" }
+bytecast-macros = { path = "./bytecast-macros" }

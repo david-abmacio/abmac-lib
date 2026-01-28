@@ -1,6 +1,6 @@
 //! Byte serialization traits.
 
-use crate::bytes::BytesError;
+use crate::BytesError;
 
 /// Serialize a value to a caller-provided buffer.
 pub trait ToBytes {

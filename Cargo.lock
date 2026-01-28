@@ -63,6 +63,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 
 [[package]]
+name = "bytecast"
+version = "1.0.0-rc.1"
+dependencies = [
+ "snafu",
+]
+
+[[package]]
+name = "bytecast-macros"
+version = "1.0.0-rc.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "bytes"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -897,20 +913,12 @@ dependencies = [
 name = "spill-ring"
 version = "1.0.0-rc.2"
 dependencies = [
+ "bytecast",
  "compio",
  "criterion",
  "libc",
  "snafu",
  "spout",
-]
-
-[[package]]
-name = "spill-ring-macros"
-version = "1.0.0-rc.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

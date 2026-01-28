@@ -1,6 +1,6 @@
 //! Implementations of ToBytes/FromBytes for primitive types.
 
-use crate::bytes::{BytesError, FromBytes, ToBytes};
+use crate::{BytesError, FromBytes, ToBytes};
 
 // u8 implementation (special case - no endianness)
 impl ToBytes for u8 {

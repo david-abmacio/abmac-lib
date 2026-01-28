@@ -1,5 +1,3 @@
-//! Tests for byte serialization.
-
 use core::{f32, f64};
 
 use super::*;

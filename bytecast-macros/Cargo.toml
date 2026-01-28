@@ -1,13 +1,13 @@
 [package]
-name = "spill-ring-macros"
-version = "1.0.0-rc.2"
+name = "bytecast-macros"
+version = "1.0.0-rc.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "Derive macros (ToBytes, FromBytes) for spill-ring serialization"
-repository = "https://github.com/abmac-io/spill"
-keywords = ["derive", "serialization", "no_std", "macros"]
-categories = ["development-tools::procedural-macro-helpers", "no-std"]
+repository = "https://github.com/abmac-io/spill/bytecast-macros"
+keywords = ["bytes", "serialization", "zero-copy", "no_std", "pod"]
+categories = ["encoding", "no-std"]
 
 [lib]
 proc-macro = true

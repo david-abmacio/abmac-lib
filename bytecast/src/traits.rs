@@ -34,7 +34,6 @@ pub trait ViewBytes<'a>: Sized {
 pub trait ToBytesExt: ToBytes {
     /// Serialize to a new Vec.
     #[cfg(feature = "alloc")]
-    #[must_use]
     fn to_vec(&self) -> Result<Vec<u8>, BytesError> {
         let size = self.byte_len().or(Self::MAX_SIZE).unwrap_or(256);
         let mut buf = alloc::vec![0u8; size];
@@ -44,7 +43,6 @@ pub trait ToBytesExt: ToBytes {
     }
 
     /// Serialize to a fixed-size array.
-    #[must_use]
     fn to_array<const N: usize>(&self) -> Result<[u8; N], BytesError> {
         let mut arr = [0u8; N];
         let n = self.to_bytes(&mut arr)?;
@@ -62,14 +60,12 @@ impl<T: ToBytes> ToBytesExt for T {}
 /// Convenience methods for FromBytes types.
 pub trait FromBytesExt: FromBytes {
     /// Deserialize, ignoring trailing bytes.
-    #[must_use]
     fn from_bytes_partial(buf: &[u8]) -> Result<Self, BytesError> {
         let (v, _) = Self::from_bytes(buf)?;
         Ok(v)
     }
 
     /// Deserialize, requiring exact buffer consumption.
-    #[must_use]
     fn from_bytes_exact(buf: &[u8]) -> Result<Self, BytesError> {
         let (v, n) = Self::from_bytes(buf)?;
         if n != buf.len() {

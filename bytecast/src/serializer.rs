@@ -11,13 +11,11 @@ pub struct ByteSerializer;
 
 impl ByteSerializer {
     /// Create a new ByteSerializer.
-    #[must_use = "constructors return a new instance and have no side effects"]
     pub const fn new() -> Self {
         Self
     }
 
     /// Serialize a value to bytes.
-    #[must_use = "serialization returns the encoded bytes"]
     pub fn serialize<T: ToBytes>(&self, value: &T) -> Result<Vec<u8>, BytesError> {
         let size = value.byte_len().or(T::MAX_SIZE).unwrap_or(256);
         let mut buf = vec![0u8; size];
@@ -27,7 +25,6 @@ impl ByteSerializer {
     }
 
     /// Deserialize a value from bytes.
-    #[must_use = "deserialization returns the decoded value"]
     pub fn deserialize<T: FromBytes>(&self, bytes: &[u8]) -> Result<T, BytesError> {
         let (value, _) = T::from_bytes(bytes)?;
         Ok(value)
@@ -41,7 +38,6 @@ pub struct ByteCursor<'a> {
 }
 
 impl<'a> ByteCursor<'a> {
-    #[must_use = "constructors return a new instance and have no side effects"]
     pub fn new(buf: &'a mut [u8]) -> Self {
         Self { buf, pos: 0 }
     }
@@ -52,17 +48,14 @@ impl<'a> ByteCursor<'a> {
         Ok(n)
     }
 
-    #[must_use = "returns the current position without modifying state"]
     pub fn position(&self) -> usize {
         self.pos
     }
 
-    #[must_use = "returns the remaining capacity without modifying state"]
     pub fn remaining(&self) -> usize {
         self.buf.len() - self.pos
     }
 
-    #[must_use = "returns the written bytes without modifying state"]
     pub fn written(&self) -> &[u8] {
         &self.buf[..self.pos]
     }
@@ -75,7 +68,6 @@ pub struct ByteReader<'a> {
 }
 
 impl<'a> ByteReader<'a> {
-    #[must_use = "constructors return a new instance and have no side effects"]
     pub fn new(buf: &'a [u8]) -> Self {
         Self { buf, pos: 0 }
     }
@@ -86,12 +78,10 @@ impl<'a> ByteReader<'a> {
         Ok(v)
     }
 
-    #[must_use = "returns the current position without modifying state"]
     pub fn position(&self) -> usize {
         self.pos
     }
 
-    #[must_use = "returns the remaining bytes without modifying state"]
     pub fn remaining(&self) -> &[u8] {
         &self.buf[self.pos..]
     }

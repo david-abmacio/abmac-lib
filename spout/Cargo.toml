@@ -5,8 +5,10 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "A minimal, composable push-based trait for sending items to a destination"
-repository = "https://github.com/abmac-io/spill/spill-ring"
-keywords = ["sink", "push", "no_std", "composable", "iterator"]
+repository = "https://github.com/abmac-io/abmac-lib"
+documentation = "https://docs.rs/spout"
+readme = "README.md"
+keywords = ["spout", "push", "no_std", "composable", "iterator"]
 categories = ["no-std", "rust-patterns"]
 
 [features]

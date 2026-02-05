@@ -12,8 +12,11 @@ keywords = ["spout", "push", "no_std", "composable", "iterator"]
 categories = ["no-std", "rust-patterns"]
 
 [features]
-std = []
+std = ["bytecast?/std"]
+bytecast = ["dep:bytecast", "dep:bytecast-macros", "bytecast/alloc"]
 
 [dependencies]
+bytecast = { workspace = true, optional = true }
+bytecast-macros = { workspace = true, optional = true }
 
 [dev-dependencies]

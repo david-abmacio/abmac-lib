@@ -188,7 +188,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct BatchSpout<T, S> {
-    buffer: Vec<T>,
+    pub(crate) buffer: Vec<T>,
     threshold: usize,
     sink: S,
 }

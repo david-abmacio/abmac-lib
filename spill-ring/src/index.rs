@@ -1,19 +1,51 @@
-//! Index abstraction for atomic or non-atomic access.
+//! Index abstractions for atomic and non-atomic access.
 
-#![allow(clippy::mut_from_ref)]
+use core::cell::UnsafeCell;
 
-#[cfg(feature = "atomics")]
+// ── SpoutCell (shared between SpillRing and SpscRing) ─────────────────
+
+/// Interior mutable cell for spout.
+#[repr(transparent)]
+pub(crate) struct SpoutCell<S>(UnsafeCell<S>);
+
+impl<S> SpoutCell<S> {
+    #[inline]
+    pub(crate) const fn new(sink: S) -> Self {
+        Self(UnsafeCell::new(sink))
+    }
+
+    /// # Safety
+    /// Caller must ensure exclusive access.
+    #[inline]
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) unsafe fn get_mut_unchecked(&self) -> &mut S {
+        unsafe { &mut *self.0.get() }
+    }
+
+    #[inline]
+    pub(crate) fn get_ref(&self) -> &S {
+        unsafe { &*self.0.get() }
+    }
+
+    #[inline]
+    pub(crate) fn get_mut(&mut self) -> &mut S {
+        self.0.get_mut()
+    }
+}
+
+unsafe impl<S: Send> Send for SpoutCell<S> {}
+unsafe impl<S: Send> Sync for SpoutCell<S> {}
+
+// ── AtomicIndex (for SpscRing) ────────────────────────────────────────
+
 mod atomic {
-    use core::{
-        cell::UnsafeCell,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     /// Atomic index using Acquire/Release ordering.
     #[repr(transparent)]
-    pub struct Index(AtomicUsize);
+    pub(crate) struct AtomicIndex(AtomicUsize);
 
-    impl Index {
+    impl AtomicIndex {
         #[inline]
         pub const fn new(val: usize) -> Self {
             Self(AtomicUsize::new(val))
@@ -37,56 +69,30 @@ mod atomic {
             self.0.store(val, Ordering::Release);
         }
 
-        /// Compare and exchange with AcqRel/Acquire ordering.
-        /// Returns Ok(current) on success, Err(actual) on failure.
+        /// Load without atomics (exclusive access).
         #[inline]
-        pub fn compare_exchange(&self, current: usize, new: usize) -> Result<usize, usize> {
-            self.0
-                .compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire)
+        pub fn load_mut(&mut self) -> usize {
+            *self.0.get_mut()
+        }
+
+        /// Store without atomics (exclusive access).
+        #[inline]
+        pub fn store_mut(&mut self, val: usize) {
+            *self.0.get_mut() = val;
         }
     }
-
-    /// Interior mutable cell for sink.
-    #[repr(transparent)]
-    pub struct SinkCell<S>(UnsafeCell<S>);
-
-    impl<S> SinkCell<S> {
-        #[inline]
-        pub const fn new(sink: S) -> Self {
-            Self(UnsafeCell::new(sink))
-        }
-
-        /// # Safety
-        /// Caller must ensure exclusive access.
-        #[inline]
-        pub unsafe fn get_mut_unchecked(&self) -> &mut S {
-            unsafe { &mut *self.0.get() }
-        }
-
-        #[inline]
-        pub fn get_ref(&self) -> &S {
-            unsafe { &*self.0.get() }
-        }
-
-        #[inline]
-        pub fn get_mut(&mut self) -> &mut S {
-            self.0.get_mut()
-        }
-    }
-
-    unsafe impl<S: Send> Send for SinkCell<S> {}
-    unsafe impl<S: Send> Sync for SinkCell<S> {}
 }
 
-#[cfg(not(feature = "atomics"))]
+// ── CellIndex (for SpillRing) ─────────────────────────────────────────
+
 mod non_atomic {
-    use core::cell::{Cell, UnsafeCell};
+    use core::cell::Cell;
 
     /// Non-atomic index for single-context use.
     #[repr(transparent)]
-    pub struct Index(Cell<usize>);
+    pub(crate) struct CellIndex(Cell<usize>);
 
-    impl Index {
+    impl CellIndex {
         #[inline]
         pub const fn new(val: usize) -> Self {
             Self(Cell::new(val))
@@ -98,49 +104,23 @@ mod non_atomic {
         }
 
         #[inline]
-        pub fn load_relaxed(&self) -> usize {
-            self.0.get()
-        }
-
-        #[inline]
         pub fn store(&self, val: usize) {
             self.0.set(val);
         }
-    }
 
-    /// Interior mutable cell for sink.
-    #[repr(transparent)]
-    pub struct SinkCell<S>(UnsafeCell<S>);
-
-    impl<S> SinkCell<S> {
+        /// Load without Cell overhead (exclusive access).
         #[inline]
-        pub const fn new(sink: S) -> Self {
-            Self(UnsafeCell::new(sink))
+        pub fn load_mut(&mut self) -> usize {
+            *self.0.get_mut()
         }
 
-        /// # Safety
-        /// Caller must ensure exclusive access.
+        /// Store without Cell overhead (exclusive access).
         #[inline]
-        pub unsafe fn get_mut_unchecked(&self) -> &mut S {
-            unsafe { &mut *self.0.get() }
-        }
-
-        #[inline]
-        pub fn get_ref(&self) -> &S {
-            unsafe { &*self.0.get() }
-        }
-
-        #[inline]
-        pub fn get_mut(&mut self) -> &mut S {
-            self.0.get_mut()
+        pub fn store_mut(&mut self, val: usize) {
+            *self.0.get_mut() = val;
         }
     }
-
-    unsafe impl<S: Send> Send for SinkCell<S> {}
 }
 
-#[cfg(feature = "atomics")]
-pub use atomic::{Index, SinkCell};
-
-#[cfg(not(feature = "atomics"))]
-pub use non_atomic::{Index, SinkCell};
+pub(crate) use atomic::AtomicIndex;
+pub(crate) use non_atomic::CellIndex;

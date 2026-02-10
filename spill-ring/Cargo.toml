@@ -4,41 +4,34 @@ version = "1.0.0-rc.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Core no_std ring buffer with overflow-to-sink semantics"
-repository = "https://github.com/abmac-io/spill/spill-ring"
-keywords = ["ring-buffer", "no_std", "embedded", "lock-free"]
+description = "Core no_std ring buffer with overflow-to-spout semantics"
+repository = "https://github.com/abmac-io/abmac-lib"
+documentation = "https://docs.rs/spill-ring"
+readme = "README.md"
+keywords = ["ring-buffer", "no_std", "embedded", "lock-free", "spout"]
 categories = ["data-structures", "no-std", "embedded"]
 
 [features]
 default = []
-std = []
-atomics = []
+std = ["spout/std"]
 
 [dependencies]
 spout = { workspace = true }
-bytecast = { workspace = true }
-snafu = { version = "0.8", default-features = false, features = ["rust_1_81"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
-compio = { version = "0.17", features = ["macros"] }
-libc = "0.2"
 
 [[bench]]
-name = "throughput"
-harness = false
-
-[[bench]]
-name = "latency"
+name = "single_thread"
 harness = false
 
 [[bench]]
 name = "spsc"
 harness = false
-required-features = ["atomics"]
+required-features = ["std"]
 
 [[bench]]
-name = "comparison"
+name = "chaining"
 harness = false
 
 [[bench]]
@@ -47,5 +40,13 @@ harness = false
 required-features = ["std"]
 
 [[example]]
-name = "compio_file_copy"
-required-features = ["atomics"]
+name = "spsc"
+required-features = ["std"]
+
+[[example]]
+name = "mpsc"
+required-features = ["std"]
+
+[[example]]
+name = "backpressure"
+required-features = ["std"]

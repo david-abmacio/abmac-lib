@@ -3,5 +3,5 @@ mod ring_chaining;
 mod spout;
 mod traits;
 
-#[cfg(feature = "atomics")]
+#[cfg(feature = "std")]
 mod concurrency;

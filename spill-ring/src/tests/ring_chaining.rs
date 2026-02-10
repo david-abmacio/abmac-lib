@@ -3,7 +3,7 @@ extern crate std;
 use std::vec;
 
 use crate::SpillRing;
-use spout::{CollectSink, FnSink};
+use spout::{CollectSpout, FnSpout};
 
 #[test]
 fn ring_chaining_basic() {
@@ -29,9 +29,9 @@ fn ring_chaining_basic() {
 
 #[test]
 fn ring_chaining_cascade_overflow() {
-    // ring1 -> ring2 -> CollectSink
+    // ring1 -> ring2 -> CollectSpout
     // When ring2 also overflows, items go to final sink
-    let final_sink = CollectSink::new();
+    let final_sink = CollectSpout::new();
     let ring2 = SpillRing::<i32, 2, _>::with_sink(final_sink);
     let ring1 = SpillRing::<i32, 2, _>::with_sink(ring2);
 
@@ -53,7 +53,7 @@ fn ring_chaining_cascade_overflow() {
 
 #[test]
 fn ring_chaining_flush_cascades() {
-    let final_sink = CollectSink::new();
+    let final_sink = CollectSpout::new();
     let ring2 = SpillRing::<i32, 4, _>::with_sink(final_sink);
     let mut ring1 = SpillRing::<i32, 4, _>::with_sink(ring2);
 
@@ -67,7 +67,7 @@ fn ring_chaining_flush_cascades() {
     assert_eq!(ring1.sink().len(), 3);
 
     // Flush ring2 -> items go to final_sink
-    unsafe { ring1.sink_mut_unchecked() }.flush();
+    ring1.sink_mut().flush();
     assert!(ring1.sink().is_empty());
     assert_eq!(ring1.sink().sink().items(), vec![1, 2, 3]);
 }
@@ -80,7 +80,7 @@ fn ring_chaining_drop_flushes_all() {
     let collected_clone = collected.clone();
 
     {
-        let final_sink = FnSink(move |x: i32| {
+        let final_sink = FnSpout(move |x: i32| {
             collected_clone.lock().unwrap().push(x);
         });
         let ring2 = SpillRing::<i32, 4, _>::with_sink(final_sink);

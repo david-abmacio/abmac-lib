@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::vec;
 
-use crate::{ChannelSpout, CollectSpout, Spout};
+use crate::{ChannelSpout, CollectSpout, Spout, SyncChannelSpout};
 
 // --- ChannelSpout tests ---
 
@@ -48,6 +48,64 @@ fn channel_spout_sender_accessor() {
 fn channel_spout_into_sender() {
     let (tx, rx) = mpsc::channel::<i32>();
     let s = ChannelSpout::new(tx);
+
+    let sender = s.into_sender();
+    sender.send(42).unwrap();
+    assert_eq!(rx.recv().unwrap(), 42);
+}
+
+// --- SyncChannelSpout tests ---
+
+#[test]
+fn sync_channel_spout_sends_items() {
+    let (tx, rx) = mpsc::sync_channel(4);
+    let mut s = SyncChannelSpout::new(tx);
+
+    s.send(1);
+    s.send(2);
+    s.send(3);
+
+    assert_eq!(rx.recv().unwrap(), 1);
+    assert_eq!(rx.recv().unwrap(), 2);
+    assert_eq!(rx.recv().unwrap(), 3);
+}
+
+#[test]
+fn sync_channel_spout_blocks_when_full() {
+    let (tx, rx) = mpsc::sync_channel(2);
+    let mut s = SyncChannelSpout::new(tx);
+
+    s.send(1);
+    s.send(2);
+    // Channel is now full — send in a thread so we can unblock it
+    let handle = thread::spawn(move || {
+        s.send(3); // blocks until receiver drains
+        s
+    });
+
+    // Drain one to unblock the sender
+    assert_eq!(rx.recv().unwrap(), 1);
+
+    let _s = handle.join().unwrap();
+    assert_eq!(rx.recv().unwrap(), 2);
+    assert_eq!(rx.recv().unwrap(), 3);
+}
+
+#[test]
+fn sync_channel_spout_ignores_disconnected_receiver() {
+    let (tx, rx) = mpsc::sync_channel::<i32>(4);
+    let mut s = SyncChannelSpout::new(tx);
+
+    drop(rx);
+
+    // Should not panic
+    s.send(1);
+}
+
+#[test]
+fn sync_channel_spout_into_sender() {
+    let (tx, rx) = mpsc::sync_channel::<i32>(4);
+    let s = SyncChannelSpout::new(tx);
 
     let sender = s.into_sender();
     sender.send(42).unwrap();

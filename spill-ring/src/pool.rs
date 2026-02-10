@@ -11,7 +11,7 @@
 //!      ▼                                                    ▼
 //!  ┌────────┐                                         ┌──────────┐
 //!  │ active │ push push push (lock-free)              │ Drain to │
-//!  └────────┘                                         │   Sink   │
+//!  └────────┘                                         │  Spout   │
 //!      │ (full)                                       └──────────┘
 //!      ▼                                                    ▲
 //!  swap with spare ◄─────(pre-fetched)                     │
@@ -32,10 +32,10 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 #[cfg(feature = "std")]
 use std::sync::{Arc, Condvar, Mutex};
 
-use crate::{DropSink, SpillRing};
+use crate::{DropSpout, SpillRing};
 
 /// A boxed ring for heap allocation (allows moving between threads).
-type BoxedRing<T, const N: usize> = Box<SpillRing<T, N, DropSink>>;
+type BoxedRing<T, const N: usize> = Box<SpillRing<T, N, DropSpout>>;
 
 /// Thread-safe queue for full rings waiting to be drained.
 #[cfg(feature = "std")]
@@ -157,7 +157,7 @@ impl<T, const N: usize> StealPool<T, N> {
     pub fn spawn_drain<F>(self: &Arc<Self>, mut drain_fn: F) -> std::thread::JoinHandle<()>
     where
         T: Send + 'static,
-        F: FnMut(&mut SpillRing<T, N, DropSink>) + Send + 'static,
+        F: FnMut(&mut SpillRing<T, N, DropSpout>) + Send + 'static,
     {
         let pool = Arc::clone(self);
         std::thread::spawn(move || {
@@ -177,7 +177,7 @@ pub struct StealProducer<T, const N: usize> {
     /// Currently active ring for pushing.
     active: BoxedRing<T, N>,
     /// Pre-fetched spare ring (swapped in when active is full).
-    spare: AtomicPtr<SpillRing<T, N, DropSink>>,
+    spare: AtomicPtr<SpillRing<T, N, DropSpout>>,
 }
 
 #[cfg(feature = "std")]

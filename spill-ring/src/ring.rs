@@ -1,319 +1,346 @@
-//! Ring buffer with overflow spilling to a sink.
+//! Ring buffer with overflow spilling to a spout.
 
-#[cfg(feature = "atomics")]
-use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{cell::UnsafeCell, mem::MaybeUninit};
 
 use crate::{
-    index::{Index, SinkCell},
-    iter::{SpillRingIter, SpillRingIterMut},
+    index::{CellIndex, SpoutCell},
+    iter::SpillRingIterMut,
     traits::{RingConsumer, RingInfo, RingProducer},
 };
-use spout::{DropSink, Sink};
+use spout::{DropSpout, Spout};
 
-/// Slot wrapper with seqlock for safe concurrent access.
-#[cfg(feature = "atomics")]
-pub(crate) struct Slot<T> {
-    /// Sequence number: odd = operation in progress, even = slot is free.
-    /// Used to coordinate access between producer and consumer on the same slot.
-    seq: AtomicUsize,
-    pub(crate) data: UnsafeCell<MaybeUninit<T>>,
-}
-
-#[cfg(feature = "atomics")]
-impl<T> Slot<T> {
-    const fn new() -> Self {
-        Self {
-            seq: AtomicUsize::new(0),
-            data: UnsafeCell::new(MaybeUninit::uninit()),
-        }
-    }
-}
-
-/// Slot wrapper without seqlock for single-threaded use.
-#[cfg(not(feature = "atomics"))]
+/// Slot wrapper holding one item in the ring buffer.
+///
+/// `#[repr(transparent)]` guarantees `[Slot<T>; N]` has the same layout
+/// as `[T; N]`, enabling bulk `memcpy` via `push_slice`.
+#[repr(transparent)]
 pub(crate) struct Slot<T> {
     pub(crate) data: UnsafeCell<MaybeUninit<T>>,
 }
 
-#[cfg(not(feature = "atomics"))]
 impl<T> Slot<T> {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             data: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 }
-
-/// Ring buffer that spills evicted items to a sink.
-pub struct SpillRing<T, const N: usize, S: Sink<T> = DropSink> {
-    pub(crate) buffer: [Slot<T>; N],
-    pub(crate) head: Index,
-    pub(crate) tail: Index,
-    sink: SinkCell<S>,
-}
-
-unsafe impl<T: Send, const N: usize, S: Sink<T> + Send> Send for SpillRing<T, N, S> {}
-
-#[cfg(feature = "atomics")]
-unsafe impl<T: Send, const N: usize, S: Sink<T> + Send> Sync for SpillRing<T, N, S> {}
 
 /// Maximum supported capacity (2^20 = ~1 million slots).
 /// Prevents accidental huge allocations from typos like `SpillRing<T, 1000000000>`.
-const MAX_CAPACITY: usize = 1 << 20;
+pub(crate) const MAX_CAPACITY: usize = 1 << 20;
 
-impl<T, const N: usize> SpillRing<T, N, DropSink> {
-    /// Create a new ring buffer (evicted items are dropped).
+/// Ring buffer that spills evicted items to a spout.
+///
+/// Single-threaded ring using `Cell`-based indices. Not `Sync` — for concurrent
+/// SPSC use, see [`SpscRing`](crate::SpscRing).
+#[repr(C)]
+pub struct SpillRing<T, const N: usize, S: Spout<T> = DropSpout> {
+    pub(crate) head: CellIndex,
+    pub(crate) tail: CellIndex,
+    pub(crate) buffer: [Slot<T>; N],
+    sink: SpoutCell<S>,
+}
+
+unsafe impl<T: Send, const N: usize, S: Spout<T> + Send> Send for SpillRing<T, N, S> {}
+
+impl<T, const N: usize> SpillRing<T, N, DropSpout> {
+    /// Create a builder for configuring a [`SpillRing`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use spill_ring::SpillRing;
+    ///
+    /// let ring = SpillRing::<u64, 256>::builder()
+    ///     .cold()
+    ///     .build();
+    /// ```
+    pub fn builder() -> crate::builder::SpillRingBuilder<T, N> {
+        crate::builder::SpillRingBuilder::new()
+    }
+
+    /// Create a new ring buffer with pre-warmed cache (evicted items are dropped).
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
+        let ring = Self::cold();
+        ring.warm();
+        ring
+    }
+
+    /// Create a new ring buffer without cache warming (evicted items are dropped).
+    ///
+    /// Use this only in constrained environments (embedded, const contexts)
+    /// where the warming overhead is unacceptable. Prefer [`new()`](Self::new)
+    /// for all other cases.
+    #[must_use]
+    pub const fn cold() -> Self {
         const { assert!(N > 0, "capacity must be > 0") };
         const { assert!(N.is_power_of_two(), "capacity must be power of two") };
         const { assert!(N <= MAX_CAPACITY, "capacity exceeds maximum (2^20)") };
 
         Self {
+            head: CellIndex::new(0),
+            tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            head: Index::new(0),
-            tail: Index::new(0),
-            sink: SinkCell::new(DropSink),
+            sink: SpoutCell::new(DropSpout),
         }
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
-    /// Create a new ring buffer with a custom sink.
+impl<T, const N: usize, S: Spout<T>> SpillRing<T, N, S> {
+    /// Create a new ring buffer with pre-warmed cache and a custom spout.
     #[must_use]
     pub fn with_sink(sink: S) -> Self {
+        let ring = Self::with_sink_cold(sink);
+        ring.warm();
+        ring
+    }
+
+    /// Create a new ring buffer with a custom spout, without cache warming.
+    #[must_use]
+    pub fn with_sink_cold(sink: S) -> Self {
         const { assert!(N > 0, "capacity must be > 0") };
         const { assert!(N.is_power_of_two(), "capacity must be power of two") };
         const { assert!(N <= MAX_CAPACITY, "capacity exceeds maximum (2^20)") };
 
         Self {
+            head: CellIndex::new(0),
+            tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            head: Index::new(0),
-            tail: Index::new(0),
-            sink: SinkCell::new(sink),
+            sink: SpoutCell::new(sink),
         }
     }
 
-    /// Push an item. If full, evicts oldest to sink.
-    ///
-    /// Thread-safe for single-producer, single-consumer (SPSC) use.
-    /// Multiple concurrent pushes or multiple concurrent pops are NOT safe.
-    ///
-    /// When the buffer is full, the oldest item is evicted to the sink.
-    #[inline]
-    #[cfg(feature = "atomics")]
-    pub fn push(&self, item: T) {
-        // Load current tail (only producer modifies tail, so relaxed is fine)
-        let tail = self.tail.load_relaxed();
-
-        // Ensure there's room: evict until tail - head < N
-        loop {
-            let head = self.head.load();
-            if tail.wrapping_sub(head) < N {
-                break; // There's room
-            }
-
-            // Buffer is full - need to evict
-            let evict_idx = head % N;
-            let slot = &self.buffer[evict_idx];
-
-            // CRITICAL: Claim the seqlock BEFORE head CAS
-            let seq = slot.seq.load(Ordering::Acquire);
-            if seq & 1 != 0 {
-                // Odd = someone else has it (consumer reading), spin
-                core::hint::spin_loop();
-                continue;
-            }
-
-            // Try to claim the seqlock
-            if slot
-                .seq
-                .compare_exchange(
-                    seq,
-                    seq.wrapping_add(1),
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_err()
-            {
-                // Lost the race, retry
-                continue;
-            }
-
-            // We have the seqlock - now try to advance head
-            match self.head.compare_exchange(head, head.wrapping_add(1)) {
-                Ok(_) => {
-                    // Success! Read and evict the item
-                    let evicted = unsafe { (*slot.data.get()).assume_init_read() };
-
-                    // Release the slot (set seq to even)
-                    slot.seq.store(seq.wrapping_add(2), Ordering::Release);
-
-                    // Send to sink
-                    unsafe { self.sink.get_mut_unchecked().send(evicted) };
-                    break; // Made room
-                }
-                Err(_) => {
-                    // Head CAS failed (consumer got it first)
-                    // Release the seqlock and retry
-                    slot.seq.store(seq.wrapping_add(2), Ordering::Release);
-                    continue;
-                }
+    /// Bring all ring slots into L1/L2 cache.
+    fn warm(&self) {
+        for i in 0..N {
+            unsafe {
+                let slot = &self.buffer[i];
+                let ptr = slot.data.get() as *mut u8;
+                core::ptr::write_bytes(ptr, 0, core::mem::size_of::<MaybeUninit<T>>());
             }
         }
-
-        // Calculate write index
-        let idx = tail % N;
-        let slot = &self.buffer[idx];
-
-        // Claim the slot for writing by setting seq to odd
-        let seq = loop {
-            let seq = slot.seq.load(Ordering::Acquire);
-            if seq & 1 == 0 {
-                // Even = slot is free, try to claim for write
-                if slot
-                    .seq
-                    .compare_exchange(
-                        seq,
-                        seq.wrapping_add(1),
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    )
-                    .is_ok()
-                {
-                    break seq; // Claimed, return the seq value
-                }
-            }
-            core::hint::spin_loop();
-        };
-
-        // Write the data (we have exclusive access)
-        unsafe { (*slot.data.get()).write(item) };
-
-        // Release the slot (set seq to even)
-        slot.seq.store(seq.wrapping_add(2), Ordering::Release);
-
-        // Publish the write by incrementing tail
-        self.tail.store(tail.wrapping_add(1));
+        self.head.store(0);
+        self.tail.store(0);
     }
 
-    /// Push an item. If full, evicts oldest to sink.
-    /// (Non-atomic version for single-threaded use)
+    /// Push an item. If full, evicts oldest to spout.
+    ///
+    /// Uses interior mutability (`Cell`). Not thread-safe — for concurrent
+    /// SPSC use, see [`SpscRing::push`](crate::SpscRing::push).
     #[inline]
-    #[cfg(not(feature = "atomics"))]
     pub fn push(&self, item: T) {
-        let tail = self.tail.load_relaxed();
-        let idx = tail % N;
-
-        // Evict if full
+        let tail = self.tail.load();
         let head = self.head.load();
+
         if tail.wrapping_sub(head) >= N {
-            let evict_idx = head % N;
+            let evict_idx = head & (N - 1);
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store(head.wrapping_add(1));
             unsafe { self.sink.get_mut_unchecked().send(evicted) };
         }
 
-        // Write item - use black_box to prevent the compiler from optimizing away
-        // the write when called across library boundaries
-        unsafe { (*self.buffer[idx].data.get()).write(core::hint::black_box(item)) };
+        let idx = tail & (N - 1);
+        unsafe { (*self.buffer[idx].data.get()).write(item) };
         self.tail.store(tail.wrapping_add(1));
     }
 
-    /// Push an item then flush all to sink.
+    /// Push an item with exclusive access (no `Cell` overhead).
+    #[inline]
+    pub fn push_mut(&mut self, item: T) {
+        let tail = self.tail.load_mut();
+        let head = self.head.load_mut();
+
+        if tail.wrapping_sub(head) >= N {
+            let evict_idx = head & (N - 1);
+            let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
+            self.head.store_mut(head.wrapping_add(1));
+            self.sink.get_mut().send(evicted);
+        }
+
+        let idx = tail & (N - 1);
+        unsafe { (*self.buffer[idx].data.get()).write(item) };
+        self.tail.store_mut(tail.wrapping_add(1));
+    }
+
+    /// Pop the oldest item with exclusive access (no `Cell` overhead).
+    #[inline]
+    #[must_use]
+    pub fn pop_mut(&mut self) -> Option<T> {
+        let head = self.head.load_mut();
+        let tail = self.tail.load_mut();
+
+        if head == tail {
+            return None;
+        }
+
+        let idx = head & (N - 1);
+        let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
+        self.head.store_mut(head.wrapping_add(1));
+        Some(item)
+    }
+
+    /// Bulk-push a slice of `Copy` items.
+    ///
+    /// Uses `memcpy` internally — at most two copies (to buffer end + wrap).
+    /// Items that overflow the ring are evicted to the spout. If the slice
+    /// is larger than the ring capacity, excess items go directly to the spout
+    /// without touching the buffer.
+    #[inline]
+    pub fn push_slice(&mut self, items: &[T])
+    where
+        T: Copy,
+    {
+        if items.is_empty() {
+            return;
+        }
+
+        let mut tail = self.tail.load_mut();
+        let mut head = self.head.load_mut();
+
+        // If slice exceeds capacity, evict ring + send excess directly to spout.
+        let keep = if items.len() > N {
+            let len = tail.wrapping_sub(head);
+            if len > 0 {
+                let h = head;
+                self.sink.get_mut().send_all((0..len).map(|i| unsafe {
+                    (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
+                }));
+            }
+            let excess = items.len() - N;
+            for &item in &items[..excess] {
+                self.sink.get_mut().send(item);
+            }
+            head = head.wrapping_add(len);
+            tail = head;
+            self.head.store_mut(head);
+            self.tail.store_mut(tail);
+            &items[excess..]
+        } else {
+            items
+        };
+
+        // Evict to make room
+        let len = tail.wrapping_sub(head);
+        let free = N - len;
+        if keep.len() > free {
+            let evict_count = keep.len() - free;
+            let h = head;
+            self.sink
+                .get_mut()
+                .send_all((0..evict_count).map(|i| unsafe {
+                    (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
+                }));
+            self.head.store_mut(head.wrapping_add(evict_count));
+        }
+
+        // Bulk memcpy (at most 2 segments)
+        let tail_idx = tail & (N - 1);
+        let space_to_end = N - tail_idx;
+        let count = keep.len();
+
+        unsafe {
+            let dst = self.buffer[tail_idx].data.get() as *mut T;
+            if count <= space_to_end {
+                core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, count);
+            } else {
+                core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, space_to_end);
+                core::ptr::copy_nonoverlapping(
+                    keep.as_ptr().add(space_to_end),
+                    self.buffer[0].data.get() as *mut T,
+                    count - space_to_end,
+                );
+            }
+        }
+
+        self.tail.store_mut(tail.wrapping_add(count));
+    }
+
+    /// Bulk-extend from a slice. Equivalent to `push_slice`.
+    #[inline]
+    pub fn extend_from_slice(&mut self, items: &[T])
+    where
+        T: Copy,
+    {
+        self.push_slice(items);
+    }
+
+    /// Bulk-pop up to `buf.len()` items into a slice. Returns the count popped.
+    ///
+    /// Uses `memcpy` internally — at most two copies (from head to buffer end + wrap).
+    #[inline]
+    pub fn pop_slice(&mut self, buf: &mut [MaybeUninit<T>]) -> usize
+    where
+        T: Copy,
+    {
+        if buf.is_empty() {
+            return 0;
+        }
+
+        let head = self.head.load_mut();
+        let tail = self.tail.load_mut();
+        let avail = tail.wrapping_sub(head);
+        let count = buf.len().min(avail);
+        if count == 0 {
+            return 0;
+        }
+
+        let head_idx = head & (N - 1);
+        let to_end = N - head_idx;
+
+        unsafe {
+            let src = self.buffer[head_idx].data.get() as *const T;
+            let dst = buf.as_mut_ptr() as *mut T;
+            if count <= to_end {
+                core::ptr::copy_nonoverlapping(src, dst, count);
+            } else {
+                core::ptr::copy_nonoverlapping(src, dst, to_end);
+                core::ptr::copy_nonoverlapping(
+                    self.buffer[0].data.get() as *const T,
+                    dst.add(to_end),
+                    count - to_end,
+                );
+            }
+        }
+
+        self.head.store_mut(head.wrapping_add(count));
+        count
+    }
+
+    /// Push an item then flush all to spout.
     #[inline]
     pub fn push_and_flush(&mut self, item: T) {
-        self.push(item);
+        self.push_mut(item);
         self.flush();
     }
 
-    /// Flush all items to sink. Returns count flushed.
+    /// Flush all items to spout. Returns count flushed.
     #[inline]
     pub fn flush(&mut self) -> usize {
-        unsafe { self.flush_unchecked() }
-    }
-
-    /// # Safety
-    /// Consumer context only.
-    pub unsafe fn flush_unchecked(&self) -> usize {
-        let mut count = 0;
-        while let Some(item) = self.pop() {
-            unsafe { self.sink.get_mut_unchecked().send(item) };
-            count += 1;
+        let head = self.head.load_mut();
+        let tail = self.tail.load_mut();
+        let count = tail.wrapping_sub(head);
+        if count == 0 {
+            return 0;
         }
+
+        let h = head;
+        self.sink.get_mut().send_all((0..count).map(|i| unsafe {
+            (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
+        }));
+
+        self.head.store_mut(tail);
+        self.tail.store_mut(tail);
         count
     }
 
     /// Pop the oldest item.
     ///
-    /// Thread-safe for single-producer, single-consumer (SPSC) use.
-    /// Multiple concurrent pushes or multiple concurrent pops are NOT safe.
+    /// Uses interior mutability (`Cell`). Not thread-safe — for concurrent
+    /// SPSC use, see [`SpscRing::pop`](crate::SpscRing::pop).
     #[inline]
     #[must_use]
-    #[cfg(feature = "atomics")]
-    pub fn pop(&self) -> Option<T> {
-        loop {
-            let head = self.head.load();
-            let tail = self.tail.load();
-
-            // Check if empty
-            if head == tail {
-                return None;
-            }
-
-            let idx = head % N;
-            let slot = &self.buffer[idx];
-
-            // CRITICAL: Claim the slot BEFORE the head CAS
-            // This prevents producer from overwriting our data
-            let seq = slot.seq.load(Ordering::Acquire);
-            if seq & 1 != 0 {
-                // Odd = someone else has it, spin and retry
-                core::hint::spin_loop();
-                continue;
-            }
-
-            // Try to claim the seqlock
-            if slot
-                .seq
-                .compare_exchange(
-                    seq,
-                    seq.wrapping_add(1),
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_err()
-            {
-                // Lost the race, retry
-                continue;
-            }
-
-            // We have the seqlock - now try to advance head
-            match self.head.compare_exchange(head, head.wrapping_add(1)) {
-                Ok(_) => {
-                    // Success! Read the data
-                    let item = unsafe { (*slot.data.get()).assume_init_read() };
-
-                    // Release the slot by setting seq to even
-                    slot.seq.store(seq.wrapping_add(2), Ordering::Release);
-
-                    return Some(item);
-                }
-                Err(_) => {
-                    // Head CAS failed (producer evicted this slot)
-                    // Release the seqlock and retry
-                    slot.seq.store(seq.wrapping_add(2), Ordering::Release);
-                    continue;
-                }
-            }
-        }
-    }
-
-    /// Pop the oldest item. (Non-atomic version)
-    #[inline]
-    #[must_use]
-    #[cfg(not(feature = "atomics"))]
     pub fn pop(&self) -> Option<T> {
         let head = self.head.load();
         let tail = self.tail.load();
@@ -322,51 +349,10 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
             return None;
         }
 
-        let idx = head % N;
+        let idx = head & (N - 1);
         let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
         self.head.store(head.wrapping_add(1));
         Some(item)
-    }
-
-    /// Peek at the oldest item.
-    ///
-    /// Note: In concurrent SPSC use, the peeked reference may become invalid
-    /// if producer evicts this item. Use with caution or prefer `pop()`.
-    #[inline]
-    #[must_use]
-    pub fn peek(&self) -> Option<&T> {
-        let head = self.head.load_relaxed();
-        let tail = self.tail.load();
-
-        if head == tail {
-            return None;
-        }
-
-        Some(unsafe {
-            let slot = &self.buffer[head % N];
-            (*slot.data.get()).assume_init_ref()
-        })
-    }
-
-    /// Peek at the newest item.
-    ///
-    /// Note: In concurrent SPSC use, the peeked reference may become invalid
-    /// if producer overwrites this slot. Use with caution.
-    #[inline]
-    #[must_use]
-    pub fn peek_back(&self) -> Option<&T> {
-        let head = self.head.load_relaxed();
-        let tail = self.tail.load();
-
-        if head == tail {
-            return None;
-        }
-
-        let idx = tail.wrapping_sub(1) % N;
-        Some(unsafe {
-            let slot = &self.buffer[idx];
-            (*slot.data.get()).assume_init_ref()
-        })
     }
 
     /// Number of items in buffer.
@@ -380,14 +366,14 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.head.load() == self.tail.load()
+        self.len() == 0
     }
 
     /// True if full.
     #[inline]
     #[must_use]
     pub fn is_full(&self) -> bool {
-        self.tail.load().wrapping_sub(self.head.load()) >= N
+        self.len() >= N
     }
 
     /// Buffer capacity.
@@ -397,56 +383,22 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
         N
     }
 
-    /// Clear buffer, flushing to sink.
+    /// Clear all items from the buffer, flushing them to the spout.
     pub fn clear(&mut self) {
         self.flush();
     }
 
-    /// Clear buffer, dropping items (bypasses sink).
-    pub fn clear_drop(&self) {
-        while self.pop().is_some() {}
-    }
-
-    /// Reference to the sink.
+    /// Reference to the spout.
     #[inline]
     #[must_use]
     pub fn sink(&self) -> &S {
         self.sink.get_ref()
     }
 
-    /// # Safety
-    /// Consumer context only.
+    /// Mutable reference to the spout.
     #[inline]
-    #[allow(clippy::mut_from_ref)]
-    pub unsafe fn sink_mut_unchecked(&self) -> &mut S {
-        unsafe { self.sink.get_mut_unchecked() }
-    }
-
-    /// Get item by index (0 = oldest).
-    ///
-    /// Note: In concurrent SPSC use, the reference may become invalid.
-    #[inline]
-    #[must_use]
-    pub fn get(&self, index: usize) -> Option<&T> {
-        let head = self.head.load_relaxed();
-        let tail = self.tail.load();
-        let len = tail.wrapping_sub(head);
-
-        if index >= len {
-            return None;
-        }
-
-        let idx = head.wrapping_add(index) % N;
-        Some(unsafe {
-            let slot = &self.buffer[idx];
-            (*slot.data.get()).assume_init_ref()
-        })
-    }
-
-    /// Iterate oldest to newest.
-    #[inline]
-    pub fn iter(&self) -> SpillRingIter<'_, T, N, S> {
-        SpillRingIter::new(self)
+    pub fn sink_mut(&mut self) -> &mut S {
+        self.sink.get_mut()
     }
 
     /// Iterate mutably, oldest to newest.
@@ -464,16 +416,16 @@ impl<T, const N: usize, S: Sink<T>> SpillRing<T, N, S> {
 }
 
 /// Draining iterator over a SpillRing.
-pub struct Drain<'a, T, const N: usize, S: Sink<T>> {
+pub struct Drain<'a, T, const N: usize, S: Spout<T>> {
     ring: &'a mut SpillRing<T, N, S>,
 }
 
-impl<T, const N: usize, S: Sink<T>> Iterator for Drain<'_, T, N, S> {
+impl<T, const N: usize, S: Spout<T>> Iterator for Drain<'_, T, N, S> {
     type Item = T;
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        self.ring.pop()
+        self.ring.pop_mut()
     }
 
     #[inline]
@@ -483,47 +435,43 @@ impl<T, const N: usize, S: Sink<T>> Iterator for Drain<'_, T, N, S> {
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> ExactSizeIterator for Drain<'_, T, N, S> {}
+impl<T, const N: usize, S: Spout<T>> ExactSizeIterator for Drain<'_, T, N, S> {}
 
-impl<T, const N: usize, S: Sink<T>> core::iter::Extend<T> for SpillRing<T, N, S> {
+impl<T, const N: usize, S: Spout<T>> core::iter::Extend<T> for SpillRing<T, N, S> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
-            self.push(item);
+            self.push_mut(item);
         }
     }
 }
 
-impl<T, const N: usize> Default for SpillRing<T, N, DropSink> {
+impl<T, const N: usize> Default for SpillRing<T, N, DropSpout> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// SpillRing can act as a Sink, enabling ring chaining (ring1 -> ring2).
-///
-/// When used as a sink, items are pushed to the ring. If the ring overflows,
-/// items spill to the ring's own sink, creating a cascade.
-impl<T, const N: usize, S: Sink<T>> Sink<T> for SpillRing<T, N, S> {
+/// SpillRing can act as a Spout, enabling ring chaining (ring1 -> ring2).
+impl<T, const N: usize, S: Spout<T>> Spout<T> for SpillRing<T, N, S> {
     #[inline]
     fn send(&mut self, item: T) {
-        self.push(item);
+        self.push_mut(item);
     }
 
     #[inline]
     fn flush(&mut self) {
-        // Flush remaining items in this ring to its sink
         SpillRing::flush(self);
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> Drop for SpillRing<T, N, S> {
+impl<T, const N: usize, S: Spout<T>> Drop for SpillRing<T, N, S> {
     fn drop(&mut self) {
         self.flush();
         self.sink.get_mut().flush();
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> RingInfo for SpillRing<T, N, S> {
+impl<T, const N: usize, S: Spout<T>> RingInfo for SpillRing<T, N, S> {
     #[inline]
     fn len(&self) -> usize {
         SpillRing::len(self)
@@ -535,34 +483,34 @@ impl<T, const N: usize, S: Sink<T>> RingInfo for SpillRing<T, N, S> {
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> RingProducer<T> for SpillRing<T, N, S> {
+impl<T, const N: usize, S: Spout<T>> RingProducer<T> for SpillRing<T, N, S> {
     #[inline]
     fn try_push(&mut self, item: T) -> Result<(), T> {
-        let tail = self.tail.load_relaxed();
-        let head = self.head.load();
+        let tail = self.tail.load_mut();
+        let head = self.head.load_mut();
 
         if tail.wrapping_sub(head) >= N {
             return Err(item);
         }
 
         unsafe {
-            let slot = &self.buffer[tail % N];
+            let slot = &self.buffer[tail & (N - 1)];
             (*slot.data.get()).write(item);
         }
-        self.tail.store(tail.wrapping_add(1));
+        self.tail.store_mut(tail.wrapping_add(1));
 
         Ok(())
     }
 }
 
-impl<T, const N: usize, S: Sink<T>> RingConsumer<T> for SpillRing<T, N, S> {
+impl<T, const N: usize, S: Spout<T>> RingConsumer<T> for SpillRing<T, N, S> {
     #[inline]
     fn try_pop(&mut self) -> Option<T> {
-        self.pop()
+        self.pop_mut()
     }
 
     #[inline]
-    fn peek(&self) -> Option<&T> {
+    fn peek(&mut self) -> Option<&T> {
         SpillRing::peek(self)
     }
 }

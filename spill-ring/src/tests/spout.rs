@@ -3,14 +3,14 @@ extern crate std;
 use std::{vec, vec::Vec};
 
 use crate::SpillRing;
-use spout::{BatchSink, CollectSink, FnSink};
+use spout::{BatchSpout, CollectSpout, FnSpout};
 
 #[test]
 fn fn_sink_receives_evicted() {
     let evicted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let evicted_clone = evicted.clone();
 
-    let ring = SpillRing::<i32, 2, _>::with_sink(FnSink(move |x| {
+    let ring = SpillRing::<i32, 2, _>::with_sink(FnSpout(move |x| {
         evicted_clone.lock().unwrap().push(x);
     }));
 
@@ -18,15 +18,16 @@ fn fn_sink_receives_evicted() {
     ring.push(2);
     ring.push(3); // Evicts 1 directly to sink
 
-    // Sink should have received 1 immediately
+    // Spout should have received 1 immediately
     assert_eq!(*evicted.lock().unwrap(), vec![1]);
 }
 
 #[test]
 fn batch_sink_with_ring_chain() {
-    // ring -> BatchSink -> CollectSink
+    // ring -> BatchSpout -> CollectSpout
     // Reduces cascade traffic
-    let batch_sink: BatchSink<i32, CollectSink<Vec<i32>>> = BatchSink::new(100, CollectSink::new());
+    let batch_sink: BatchSpout<i32, CollectSpout<Vec<i32>>> =
+        BatchSpout::new(100, CollectSpout::new());
     let ring = SpillRing::<i32, 4, _>::with_sink(batch_sink);
 
     for i in 0..1000 {
@@ -42,13 +43,13 @@ fn batch_sink_with_ring_chain() {
 #[cfg(feature = "std")]
 mod channel_sink_tests {
     use crate::SpillRing;
-    use spout::{ChannelSink, Sink};
+    use spout::{ChannelSpout, Spout};
     use std::sync::mpsc;
 
     #[test]
     fn channel_sink_sends_evicted_items() {
         let (tx, rx) = mpsc::channel();
-        let ring = SpillRing::<i32, 4, _>::with_sink(ChannelSink::new(tx));
+        let ring = SpillRing::<i32, 4, _>::with_sink(ChannelSpout::new(tx));
 
         // Fill ring
         ring.push(1);
@@ -71,7 +72,7 @@ mod channel_sink_tests {
     #[test]
     fn channel_sink_with_flush() {
         let (tx, rx) = mpsc::channel();
-        let mut ring = SpillRing::<i32, 4, _>::with_sink(ChannelSink::new(tx));
+        let mut ring = SpillRing::<i32, 4, _>::with_sink(ChannelSpout::new(tx));
 
         ring.push(10);
         ring.push(20);
@@ -88,7 +89,7 @@ mod channel_sink_tests {
         let (tx, rx) = mpsc::channel();
 
         {
-            let ring = SpillRing::<i32, 4, _>::with_sink(ChannelSink::new(tx));
+            let ring = SpillRing::<i32, 4, _>::with_sink(ChannelSpout::new(tx));
             ring.push(1);
             ring.push(2);
             // Ring dropped here, flushes to sink
@@ -101,7 +102,7 @@ mod channel_sink_tests {
     #[test]
     fn channel_sink_accessors() {
         let (tx, rx) = mpsc::channel();
-        let sink = ChannelSink::new(tx);
+        let sink = ChannelSpout::new(tx);
 
         // Test sender() accessor
         sink.sender().send(42).unwrap();
@@ -116,7 +117,7 @@ mod channel_sink_tests {
     #[test]
     fn channel_sink_ignores_disconnected_receiver() {
         let (tx, rx) = mpsc::channel::<i32>();
-        let mut sink = ChannelSink::new(tx);
+        let mut sink = ChannelSpout::new(tx);
 
         // Drop receiver
         drop(rx);
@@ -131,8 +132,8 @@ mod channel_sink_tests {
         // Multiple rings sending to one receiver
         let (tx, rx) = mpsc::channel();
 
-        let ring1 = SpillRing::<i32, 2, _>::with_sink(ChannelSink::new(tx.clone()));
-        let ring2 = SpillRing::<i32, 2, _>::with_sink(ChannelSink::new(tx.clone()));
+        let ring1 = SpillRing::<i32, 2, _>::with_sink(ChannelSpout::new(tx.clone()));
+        let ring2 = SpillRing::<i32, 2, _>::with_sink(ChannelSpout::new(tx.clone()));
         drop(tx); // Drop original sender
 
         // Fill and overflow both rings

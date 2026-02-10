@@ -32,7 +32,7 @@ fn ring_consumer_trait() {
     ring.push(20);
 
     // peek
-    assert_eq!(RingConsumer::peek(&ring), Some(&10));
+    assert_eq!(RingConsumer::peek(&mut ring), Some(&10));
 
     // try_pop
     assert_eq!(RingConsumer::try_pop(&mut ring), Some(10));

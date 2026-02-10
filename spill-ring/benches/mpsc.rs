@@ -1,308 +1,171 @@
 //! MPSC (Multiple-Producer, Single-Consumer) benchmarks.
 //!
-//! Zero-overhead MPSC: each producer owns its own ring, no shared state.
-//! Runs with the default (non-atomic) configuration for maximum performance.
+//! Pooled benchmarks use `push(&self)` via WorkerPool — the atomic path.
+//! The single-thread baseline uses `push_mut(&mut self)` — the exclusive path.
+//! Group names include the method under test so comparisons are self-describing.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use spill_ring::{MpscRing, SpillRing, collect};
-use spout::{CollectSink, DropSink, ProducerSink, Sink};
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    thread,
-};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use spill_ring::{MpscRing, SpillRing};
+use spout::CollectSpout;
+use std::hint::black_box;
 
-/// Benchmark MPSC throughput with varying producer counts.
+/// Benchmark MPSC throughput with varying worker counts.
 fn mpsc_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_throughput");
 
-    for num_producers in [1, 2, 4, 8] {
-        let iterations_per_producer = 100_000u64;
-        let total = iterations_per_producer * num_producers as u64;
+    for num_workers in [1, 2, 4, 8] {
+        let iterations_per_worker = 100_000u64;
+        let total = iterations_per_worker * num_workers as u64;
         group.throughput(Throughput::Elements(total));
 
         group.bench_with_input(
-            BenchmarkId::new("producers", num_producers),
-            &num_producers,
+            BenchmarkId::new("workers", num_workers),
+            &num_workers,
             |b, &n| {
+                let mut pool = MpscRing::<u64, 1024>::pool(n).spawn(|ring, id, count: &u64| {
+                    for i in 0..*count {
+                        ring.push(black_box(id as u64 * 1_000_000 + i));
+                    }
+                });
+
                 b.iter(|| {
-                    // Simple API - just measure push throughput
-                    let producers = MpscRing::<u64, 1024>::new(n);
-
-                    thread::scope(|s| {
-                        for producer in producers {
-                            s.spawn(move || {
-                                for i in 0..iterations_per_producer {
-                                    producer.push(black_box(i));
-                                }
-                                // Producer drops here
-                            });
-                        }
-                    });
-
-                    black_box(n)
-                })
+                    pool.run(&iterations_per_worker);
+                });
             },
         );
     }
     group.finish();
 }
 
-/// Benchmark with full producer collection and drain.
+/// Benchmark full cycle: push + drain through consumer.
 fn mpsc_full_cycle(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_full_cycle");
 
-    for num_producers in [1, 2, 4, 8] {
-        let iterations_per_producer = 50_000u64;
-        let total = iterations_per_producer * num_producers as u64;
+    for num_workers in [1, 2, 4, 8] {
+        let iterations_per_worker = 50_000u64;
+        let total = iterations_per_worker * num_workers as u64;
         group.throughput(Throughput::Elements(total));
 
         group.bench_with_input(
-            BenchmarkId::new("producers", num_producers),
-            &num_producers,
+            BenchmarkId::new("workers", num_workers),
+            &num_workers,
             |b, &n| {
+                let mut pool = MpscRing::<u64, 1024>::pool(n).spawn(|ring, id, count: &u64| {
+                    for i in 0..*count {
+                        ring.push(black_box(id as u64 * 1_000_000 + i));
+                    }
+                });
+
                 b.iter(|| {
-                    let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(n);
-
-                    let finished: Vec<_> = thread::scope(|s| {
-                        producers
-                            .into_iter()
-                            .map(|producer| {
-                                s.spawn(move || {
-                                    for i in 0..iterations_per_producer {
-                                        producer.push(black_box(i));
-                                    }
-                                    producer
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .map(|h| h.join().unwrap())
-                            .collect()
-                    });
-
-                    collect(finished, &mut consumer);
-                    let mut sink = CollectSink::new();
-                    consumer.drain(&mut sink);
-                    black_box(sink.into_items().len())
-                })
+                    pool.run(&iterations_per_worker);
+                });
+                // Note: drain happens once after all iterations, not per-iteration.
+                // This isolates push throughput from drain cost.
             },
         );
     }
     group.finish();
 }
 
-/// Compare MPSC vs single-threaded baseline.
+/// Compare single-threaded exclusive path vs pooled 4-worker atomic path.
 fn mpsc_vs_single(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_vs_single");
 
     let total_items = 200_000u64;
     group.throughput(Throughput::Elements(total_items));
 
-    // Single-threaded baseline
-    group.bench_function("single_thread", |b| {
+    // Single-threaded baseline — exclusive `push_mut` path
+    group.bench_function("single_push_mut", |b| {
+        let mut ring: SpillRing<u64, 1024> = SpillRing::new();
         b.iter(|| {
-            let ring: SpillRing<u64, 1024> = SpillRing::new();
+            ring.clear();
             for i in 0..total_items {
-                ring.push(black_box(i));
+                ring.push_mut(black_box(i));
             }
-            black_box(ring.len())
         })
     });
 
-    // MPSC with 4 producers (50k each)
-    group.bench_function("mpsc_4_producers", |b| {
+    // Pooled 4 workers (50k each) — atomic `push` path
+    group.bench_function("pool_4w_push", |b| {
+        let per_worker = total_items / 4;
+        let mut pool = MpscRing::<u64, 1024>::pool(4).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(black_box(id as u64 * 1_000_000 + i));
+            }
+        });
+
         b.iter(|| {
-            let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(4);
-            let per_producer = total_items / 4;
-
-            let finished: Vec<_> = thread::scope(|s| {
-                producers
-                    .into_iter()
-                    .map(|producer| {
-                        s.spawn(move || {
-                            for i in 0..per_producer {
-                                producer.push(black_box(i));
-                            }
-                            producer
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect()
-            });
-
-            collect(finished, &mut consumer);
-            let mut sink = CollectSink::new();
-            consumer.drain(&mut sink);
-            black_box(sink.into_items().len())
-        })
+            pool.run(&per_worker);
+        });
     });
 
     group.finish();
 }
 
-/// Benchmark scaling - how throughput scales with producer count.
+/// Benchmark scaling — fixed total work split across workers.
 fn mpsc_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("mpsc_scaling");
 
-    // Fixed total work, split across producers
     let total_items = 400_000u64;
 
-    for num_producers in [1, 2, 4, 8] {
-        let per_producer = total_items / num_producers as u64;
+    for num_workers in [1, 2, 4, 8] {
+        let per_worker = total_items / num_workers as u64;
         group.throughput(Throughput::Elements(total_items));
 
         group.bench_with_input(
-            BenchmarkId::new("producers", num_producers),
-            &num_producers,
+            BenchmarkId::new("workers", num_workers),
+            &num_workers,
             |b, &n| {
+                let mut pool = MpscRing::<u64, 2048>::pool(n).spawn(|ring, id, count: &u64| {
+                    for i in 0..*count {
+                        ring.push(black_box(id as u64 * 1_000_000 + i));
+                    }
+                });
+
                 b.iter(|| {
-                    let (producers, mut consumer) = MpscRing::<u64, 2048>::with_consumer(n);
-
-                    let finished: Vec<_> = thread::scope(|s| {
-                        producers
-                            .into_iter()
-                            .map(|producer| {
-                                s.spawn(move || {
-                                    for i in 0..per_producer {
-                                        producer.push(black_box(i));
-                                    }
-                                    producer
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .map(|h| h.join().unwrap())
-                            .collect()
-                    });
-
-                    collect(finished, &mut consumer);
-                    black_box(consumer.len())
-                })
+                    pool.run(&per_worker);
+                });
             },
         );
     }
     group.finish();
 }
 
-/// Compare ProducerSink vs manual custom sink implementation.
-fn producer_sink_overhead(c: &mut Criterion) {
-    let mut group = c.benchmark_group("producer_sink_overhead");
+/// Benchmark with CollectSpout sink to measure spout overhead.
+fn spout_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("spout_overhead");
 
-    let iterations_per_producer = 100_000u64;
-    let num_producers = 4;
-    let total = iterations_per_producer * num_producers as u64;
+    let iterations_per_worker = 100_000u64;
+    let num_workers = 4;
+    let total = iterations_per_worker * num_workers as u64;
     group.throughput(Throughput::Elements(total));
 
-    // Using ProducerSink helper - sinks auto-flush on drop, no manual drain needed
-    group.bench_function("producer_sink", |b| {
+    // DropSpout (no-op sink)
+    group.bench_function("drop_spout", |b| {
+        let mut pool = MpscRing::<u64, 1024>::pool(num_workers).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(black_box(id as u64 * 1_000_000 + i));
+            }
+        });
+
         b.iter(|| {
-            let sink = ProducerSink::new(|_id| CollectSink::<u64>::new());
-            let producers = MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
-
-            thread::scope(|s| {
-                for producer in producers {
-                    s.spawn(move || {
-                        for i in 0..iterations_per_producer {
-                            producer.push(black_box(i));
-                        }
-                        // Producer drops here, flushes to sink
-                    });
-                }
-            });
-
-            black_box(num_producers)
-        })
+            pool.run(&iterations_per_worker);
+        });
     });
 
-    // Manual custom sink (what user would write without ProducerSink)
-    struct ManualSink {
-        inner: Option<CollectSink<u64>>,
-        #[allow(dead_code)]
-        producer_id: usize,
-        next_id: Arc<AtomicUsize>,
-    }
+    // CollectSpout (allocating sink)
+    group.bench_function("collect_spout", |b| {
+        let mut pool =
+            MpscRing::<u64, 1024, _>::pool_with_sink(num_workers, CollectSpout::<u64>::new())
+                .spawn(|ring, id, count: &u64| {
+                    for i in 0..*count {
+                        ring.push(black_box(id as u64 * 1_000_000 + i));
+                    }
+                });
 
-    impl Clone for ManualSink {
-        fn clone(&self) -> Self {
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            Self {
-                inner: None,
-                producer_id: id,
-                next_id: Arc::clone(&self.next_id),
-            }
-        }
-    }
-
-    impl Sink<u64> for ManualSink {
-        fn send(&mut self, item: u64) {
-            if self.inner.is_none() {
-                self.inner = Some(CollectSink::new());
-            }
-            self.inner.as_mut().unwrap().send(item);
-        }
-        fn flush(&mut self) {
-            if let Some(inner) = &mut self.inner {
-                inner.flush();
-            }
-        }
-    }
-
-    group.bench_function("manual_sink", |b| {
         b.iter(|| {
-            let sink = ManualSink {
-                inner: None,
-                producer_id: 0,
-                next_id: Arc::new(AtomicUsize::new(0)),
-            };
-            let producers = MpscRing::<u64, 1024, _>::with_sink(num_producers, sink);
-
-            thread::scope(|s| {
-                for producer in producers {
-                    s.spawn(move || {
-                        for i in 0..iterations_per_producer {
-                            producer.push(black_box(i));
-                        }
-                        // Producer drops here, flushes to sink
-                    });
-                }
-            });
-
-            black_box(num_producers)
-        })
-    });
-
-    // No sink (DropSink) baseline - using with_consumer for manual drain
-    group.bench_function("drop_sink", |b| {
-        b.iter(|| {
-            let (producers, mut consumer) = MpscRing::<u64, 1024>::with_consumer(num_producers);
-
-            let finished: Vec<_> = thread::scope(|s| {
-                producers
-                    .into_iter()
-                    .map(|producer| {
-                        s.spawn(move || {
-                            for i in 0..iterations_per_producer {
-                                producer.push(black_box(i));
-                            }
-                            producer
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect()
-            });
-
-            collect(finished, &mut consumer);
-            let count = consumer.len();
-            consumer.drain(&mut DropSink);
-            black_box(count)
-        })
+            pool.run(&iterations_per_worker);
+        });
     });
 
     group.finish();
@@ -314,6 +177,6 @@ criterion_group!(
     mpsc_full_cycle,
     mpsc_vs_single,
     mpsc_scaling,
-    producer_sink_overhead,
+    spout_overhead,
 );
 criterion_main!(benches);

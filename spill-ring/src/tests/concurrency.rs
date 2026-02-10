@@ -3,12 +3,12 @@ extern crate std;
 use std::sync::Arc;
 use std::thread;
 
-use crate::SpillRing;
+use crate::SpscRing;
 
 /// Test SPSC: one producer thread, one consumer thread.
 #[test]
 fn spsc_producer_consumer() {
-    let ring = Arc::new(SpillRing::<usize, 64>::new());
+    let ring = Arc::new(SpscRing::<usize, 64>::new());
     let num_items: usize = 10_000;
 
     let producer_ring = Arc::clone(&ring);
@@ -59,7 +59,7 @@ fn spsc_producer_consumer() {
 /// Stress test: rapid push/pop in SPSC pattern.
 #[test]
 fn spsc_stress() {
-    let ring = Arc::new(SpillRing::<usize, 16>::new());
+    let ring = Arc::new(SpscRing::<usize, 16>::new());
     let iterations = 50_000;
 
     let producer_ring = Arc::clone(&ring);
@@ -100,10 +100,75 @@ fn spsc_stress() {
     assert!(consumed > 0);
 }
 
+/// Test split() — typed producer/consumer handles enforce SPSC contract.
+#[test]
+fn spsc_split_basic() {
+    let (producer, consumer) = SpscRing::<usize, 64>::new().split();
+    let num_items: usize = 10_000;
+
+    let t = thread::spawn(move || {
+        for i in 0..num_items {
+            producer.push(i);
+        }
+    });
+
+    t.join().expect("producer panicked");
+
+    // Drain remaining items — verify monotonic ordering
+    let mut received = std::vec::Vec::new();
+    while let Some(v) = consumer.pop() {
+        received.push(v);
+    }
+
+    assert!(!received.is_empty());
+    for w in received.windows(2) {
+        assert!(w[1] > w[0], "values not monotonic: {} then {}", w[0], w[1]);
+    }
+}
+
+/// Test split() with concurrent producer and consumer.
+#[test]
+fn spsc_split_concurrent() {
+    let (producer, consumer) = SpscRing::<usize, 32>::new().split();
+    let num_items: usize = 50_000;
+
+    let prod_handle = thread::spawn(move || {
+        for i in 0..num_items {
+            producer.push(i);
+        }
+    });
+
+    let cons_handle = thread::spawn(move || {
+        let mut count = 0;
+        let mut last: Option<usize> = None;
+        let mut spins = 0;
+        loop {
+            if let Some(v) = consumer.pop() {
+                if let Some(l) = last {
+                    assert!(v > l, "ordering violated: {} then {}", l, v);
+                }
+                last = Some(v);
+                count += 1;
+                spins = 0;
+            } else {
+                spins += 1;
+                if spins > 100_000 {
+                    break;
+                }
+            }
+        }
+        count
+    });
+
+    prod_handle.join().expect("producer panicked");
+    let consumed = cons_handle.join().expect("consumer panicked");
+    assert!(consumed > 0);
+}
+
 /// Test that consumer sees consistent state during producer activity.
 #[test]
 fn spsc_len_consistency() {
-    let ring = Arc::new(SpillRing::<usize, 32>::new());
+    let ring = Arc::new(SpscRing::<usize, 32>::new());
 
     let producer_ring = Arc::clone(&ring);
     let producer = thread::spawn(move || {

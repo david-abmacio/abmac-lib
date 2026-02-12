@@ -12,10 +12,6 @@ use spout::{CollectSpout, DropSpout};
 use std::collections::VecDeque;
 use std::hint::black_box;
 
-// ---------------------------------------------------------------------------
-// Throughput — push
-// ---------------------------------------------------------------------------
-
 /// Push throughput with DropSpout (items discarded on eviction).
 fn push_mut_drop_sink(c: &mut Criterion) {
     let mut group = c.benchmark_group("single/push_mut/drop_sink");
@@ -108,10 +104,6 @@ fn push_mut_collect_sink(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Throughput — pop
-// ---------------------------------------------------------------------------
-
 /// Pop throughput. Each iteration refills the ring then pops all items.
 fn pop_mut_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("single/pop_mut");
@@ -177,10 +169,6 @@ fn pop_mut_throughput(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Throughput — interleaved push/pop
-// ---------------------------------------------------------------------------
-
 /// Push+pop interleaved (realistic usage pattern).
 fn push_pop_mut_interleaved(c: &mut Criterion) {
     let mut group = c.benchmark_group("single/push_pop_mut");
@@ -234,10 +222,6 @@ fn push_pop_mut_interleaved(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Throughput — item size impact
-// ---------------------------------------------------------------------------
-
 /// Impact of item size on push throughput.
 fn item_size_impact(c: &mut Criterion) {
     let mut group = c.benchmark_group("single/item_size");
@@ -284,10 +268,6 @@ fn item_size_impact(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ---------------------------------------------------------------------------
-// Latency — per-operation timing
-// ---------------------------------------------------------------------------
 
 /// Single push latency when buffer has room.
 fn push_mut_latency_not_full(c: &mut Criterion) {
@@ -388,10 +368,6 @@ fn drain_latency(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ---------------------------------------------------------------------------
-// Comparison — SpillRing vs VecDeque
-// ---------------------------------------------------------------------------
 
 /// Push comparison: SpillRing vs VecDeque.
 fn vs_vecdeque_push(c: &mut Criterion) {
@@ -522,10 +498,6 @@ fn vs_vecdeque_interleaved(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Cache effects & eviction overhead
-// ---------------------------------------------------------------------------
-
 /// Cache effects — small vs large capacity.
 fn cache_effects(c: &mut Criterion) {
     let mut group = c.benchmark_group("single/cache_effects");
@@ -608,10 +580,6 @@ fn eviction_overhead(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ---------------------------------------------------------------------------
-// Criterion wiring
-// ---------------------------------------------------------------------------
 
 criterion_group!(
     throughput_benches,

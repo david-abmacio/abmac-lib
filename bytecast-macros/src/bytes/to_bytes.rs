@@ -78,10 +78,6 @@ fn validate_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<syn::
     Ok(disc_ident)
 }
 
-// =============================================================================
-// Field access helpers
-// =============================================================================
-
 /// Returns the accessor token for a field (e.g. `self.name` or `self.0`),
 /// with deref for boxed fields.
 fn field_accessor(field: &syn::Field, index: usize) -> TokenStream2 {
@@ -117,10 +113,6 @@ fn active_fields(fields: &Fields) -> Vec<(usize, &syn::Field)> {
         Fields::Unit => vec![],
     }
 }
-
-// =============================================================================
-// Struct serialization
-// =============================================================================
 
 fn generate_struct(fields: &Fields) -> TokenStream2 {
     let writes: Vec<_> = active_fields(fields)
@@ -179,10 +171,6 @@ fn generate_max_size_struct(fields: &Fields) -> TokenStream2 {
         }
     }
 }
-
-// =============================================================================
-// Enum serialization
-// =============================================================================
 
 fn generate_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> TokenStream2 {
     let match_arms: Vec<_> = data
@@ -301,10 +289,6 @@ fn generate_max_size_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> Token
         }
     }
 }
-
-// =============================================================================
-// Enum helpers
-// =============================================================================
 
 fn enum_field_names(count: usize) -> Vec<syn::Ident> {
     (0..count)

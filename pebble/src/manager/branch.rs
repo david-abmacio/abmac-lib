@@ -1,0 +1,179 @@
+//! Branch tracking for checkpoint history.
+//!
+//! Branches are a metadata overlay on the existing `ComputationDAG`.
+//! The DAG remains the single source of truth for dependencies;
+//! `BranchTracker` adds naming, lineage, and navigation.
+
+use alloc::string::String;
+use alloc::vec::Vec;
+use hashbrown::HashMap;
+
+/// Auto-assigned branch identifier, separate from checkpoint IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BranchId(pub u64);
+
+/// The default branch, created when branching is enabled.
+pub const HEAD: BranchId = BranchId(0);
+
+/// Per-branch metadata.
+#[derive(Debug, Clone)]
+pub struct BranchInfo<T> {
+    /// Branch identifier.
+    pub id: BranchId,
+    /// Human-readable name.
+    pub name: String,
+    /// Checkpoint ID where this branch forked off. `None` for HEAD.
+    pub fork_point: Option<T>,
+    /// Branch this was forked from. `None` for HEAD.
+    pub parent: Option<BranchId>,
+    /// Most recent checkpoint added to this branch.
+    pub head: Option<T>,
+}
+
+verdict::display_error! {
+    /// Error type for branching operations.
+    #[derive(Clone, PartialEq, Eq)]
+    pub enum BranchError {
+        #[display("branching not enabled")]
+        BranchingNotEnabled,
+
+        #[display("branch {id:?} not found")]
+        BranchNotFound { id: BranchId },
+
+        #[display("fork-point checkpoint not found")]
+        CheckpointNotFound,
+
+        #[display("branch name already used: {name}")]
+        NameAlreadyUsed { name: String },
+    }
+}
+
+/// Tracks branch metadata for checkpoints.
+///
+/// This is a pure metadata structure — it does not own checkpoints
+/// or interact with storage. `PebbleManager` owns the tracker and
+/// calls into it during `add()`, `remove()`, and `fork()`.
+pub struct BranchTracker<T: Copy + Eq + core::hash::Hash> {
+    branches: HashMap<BranchId, BranchInfo<T>>,
+    checkpoint_to_branch: HashMap<T, BranchId>,
+    active: BranchId,
+    next_id: u64,
+}
+
+impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
+    /// Create a new tracker with a HEAD branch.
+    pub fn new() -> Self {
+        let mut branches = HashMap::new();
+        branches.insert(
+            HEAD,
+            BranchInfo {
+                id: HEAD,
+                name: String::from("head"),
+                fork_point: None,
+                parent: None,
+                head: None,
+            },
+        );
+        Self {
+            branches,
+            checkpoint_to_branch: HashMap::new(),
+            active: HEAD,
+            next_id: 1,
+        }
+    }
+
+    /// Create a new branch forking from a checkpoint on an existing branch.
+    pub fn create_branch(
+        &mut self,
+        name: &str,
+        fork_point: T,
+        parent: BranchId,
+    ) -> core::result::Result<BranchId, BranchError> {
+        if !self.branches.contains_key(&parent) {
+            return Err(BranchError::BranchNotFound { id: parent });
+        }
+        if self.branches.values().any(|b| b.name == name) {
+            return Err(BranchError::NameAlreadyUsed {
+                name: String::from(name),
+            });
+        }
+        let id = BranchId(self.next_id);
+        self.next_id += 1;
+        self.branches.insert(
+            id,
+            BranchInfo {
+                id,
+                name: String::from(name),
+                fork_point: Some(fork_point),
+                parent: Some(parent),
+                head: None,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Assign a checkpoint to a branch.
+    pub fn assign(&mut self, checkpoint_id: T, branch_id: BranchId) {
+        self.checkpoint_to_branch.insert(checkpoint_id, branch_id);
+    }
+
+    /// Which branch does this checkpoint belong to?
+    pub fn branch_of(&self, checkpoint_id: T) -> Option<BranchId> {
+        self.checkpoint_to_branch.get(&checkpoint_id).copied()
+    }
+
+    /// Remove a checkpoint from branch tracking.
+    pub fn remove_checkpoint(&mut self, checkpoint_id: T) {
+        self.checkpoint_to_branch.remove(&checkpoint_id);
+    }
+
+    /// Get info for a branch.
+    pub fn info(&self, branch_id: BranchId) -> Option<&BranchInfo<T>> {
+        self.branches.get(&branch_id)
+    }
+
+    /// Get mutable info for a branch.
+    pub fn info_mut(&mut self, branch_id: BranchId) -> Option<&mut BranchInfo<T>> {
+        self.branches.get_mut(&branch_id)
+    }
+
+    /// Iterate all branches.
+    pub fn all_branches(&self) -> impl Iterator<Item = &BranchInfo<T>> {
+        self.branches.values()
+    }
+
+    /// Find all branches that fork at a given checkpoint.
+    pub fn branches_forked_at(&self, checkpoint_id: T) -> Vec<BranchId> {
+        self.branches
+            .values()
+            .filter(|b| b.fork_point == Some(checkpoint_id))
+            .map(|b| b.id)
+            .collect()
+    }
+
+    /// Walk the parent chain from a branch back to HEAD.
+    /// Returns the chain including the starting branch.
+    pub fn lineage(&self, branch_id: BranchId) -> Option<Vec<BranchId>> {
+        let mut chain = Vec::new();
+        let mut current = self.branches.get(&branch_id);
+        while let Some(info) = current {
+            chain.push(info.id);
+            current = info.parent.and_then(|pid| self.branches.get(&pid));
+        }
+        if chain.is_empty() { None } else { Some(chain) }
+    }
+
+    /// The currently active branch.
+    pub fn active(&self) -> BranchId {
+        self.active
+    }
+
+    /// Set the active branch.
+    pub fn set_active(&mut self, branch_id: BranchId) -> core::result::Result<(), BranchError> {
+        if !self.branches.contains_key(&branch_id) {
+            return Err(BranchError::BranchNotFound { id: branch_id });
+        }
+        self.active = branch_id;
+        Ok(())
+    }
+}

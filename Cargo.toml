@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["bytecast", "bytecast-macros", "spout", "spill-ring", "verdict"]
+members = ["bytecast", "bytecast-macros", "spout", "spill-ring", "verdict", "pebble"]
 
 [workspace.package]
 

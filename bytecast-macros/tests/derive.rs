@@ -2,10 +2,6 @@
 
 use bytecast::{BytesError, DeriveFromBytes, DeriveToBytes, FromBytes, ToBytes};
 
-// =============================================================================
-// Struct tests
-// =============================================================================
-
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 struct UnitStruct;
 
@@ -85,10 +81,6 @@ fn test_derive_nested_struct() {
     assert_eq!(decoded, value);
     assert_eq!(consumed, 7);
 }
-
-// =============================================================================
-// Enum tests
-// =============================================================================
 
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 enum UnitEnum {
@@ -196,10 +188,6 @@ fn test_derive_enum_invalid_discriminant() {
     assert!(matches!(result, Err(BytesError::InvalidData { .. })));
 }
 
-// =============================================================================
-// Skip attribute tests
-// =============================================================================
-
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 struct SkipNamed {
     a: u32,
@@ -249,10 +237,6 @@ fn test_derive_skip_tuple_field() {
     assert_eq!(decoded.1, 0); // default
     assert_eq!(decoded.2, 42);
 }
-
-// =============================================================================
-// repr(uN) enum tests
-// =============================================================================
 
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 #[repr(u32)]
@@ -327,10 +311,6 @@ fn test_derive_repr_u16_enum() {
     assert_eq!(ReprU16Enum::MAX_SIZE, Some(6));
 }
 
-// =============================================================================
-// boxed field tests
-// =============================================================================
-
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 struct BoxedNamed {
     id: u16,
@@ -374,10 +354,6 @@ fn test_boxed_max_size() {
     assert_eq!(BoxedTuple::MAX_SIZE, Some(5));
 }
 
-// =============================================================================
-// PhantomData auto-skip tests
-// =============================================================================
-
 use core::marker::PhantomData;
 
 #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
@@ -401,10 +377,6 @@ fn test_phantom_data_auto_skip() {
     assert_eq!(decoded, original);
     assert_eq!(WithPhantom::<String>::MAX_SIZE, Some(4));
 }
-
-// =============================================================================
-// byte_len tests
-// =============================================================================
 
 #[test]
 fn test_derive_byte_len() {

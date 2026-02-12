@@ -69,10 +69,6 @@ fn validate_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<syn::
     Ok(disc_ident)
 }
 
-// =============================================================================
-// Field read generation
-// =============================================================================
-
 /// Generate a read statement for a single struct field.
 fn field_read(field: &syn::Field, var_name: &syn::Ident) -> TokenStream2 {
     let field_type = &field.ty;
@@ -93,10 +89,6 @@ fn field_read(field: &syn::Field, var_name: &syn::Ident) -> TokenStream2 {
         quote! { #read let #var_name = val; }
     }
 }
-
-// =============================================================================
-// Struct deserialization
-// =============================================================================
 
 fn generate_struct(name: &syn::Ident, fields: &Fields) -> (TokenStream2, TokenStream2) {
     match fields {
@@ -130,10 +122,6 @@ fn generate_struct(name: &syn::Ident, fields: &Fields) -> (TokenStream2, TokenSt
         Fields::Unit => (quote! {}, quote! { #name }),
     }
 }
-
-// =============================================================================
-// Enum deserialization
-// =============================================================================
 
 fn generate_enum(name: &syn::Ident, data: &syn::DataEnum, disc_type: &syn::Ident) -> TokenStream2 {
     let match_arms: Vec<_> = data

@@ -50,6 +50,7 @@ extern crate alloc;
 extern crate std;
 
 mod actionable;
+mod macros;
 mod status;
 
 #[cfg(feature = "alloc")]

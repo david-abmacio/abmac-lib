@@ -18,7 +18,7 @@ Implement `Checkpointable` and `CheckpointSerializer` for your type, then pass t
 
 ## How It Works
 
-Pebble implements the Red-Blue Pebble Game, a model for space-time tradeoffs in computation:
+Pebble implements the Red-Blue Pebble Game, a model for space-time tradeoffs:
 
 ```
 Events:      [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] ... [100]
@@ -31,9 +31,27 @@ Checkpoints:     [2]         [5]         [8]         [10]
 
 **Red pebbles** are checkpoints in fast memory — instant access, bounded space. **Blue pebbles** are checkpoints in storage — requires I/O, unbounded space. The algorithm automatically decides which to keep and which to evict.
 
+## The Dependency Graph
+
+Pebble tracks how checkpoints relate to each other using a DAG,  directed acyclic graph.  Pebble records when a checkpoit is created along with its origin. Over time, this forms a graph of dependencies that the algo uses to make eviction and rebuild decisions. If a checkpoint gets evicted from fast memory, pebble walks the graph to find the cheapest way to reconstruct it from what's available. This  prevents it from evicting a checkpoint that others depend on, which would be cheap to keep but expensive to lose.
+
+## Hot and Cold Storage
+
+Checkpoints live in one of two places. Hot storage keeps them in memory where access is immediate. Cold storage serializes them to a backend you provide, whether that's flash, disk, or a custom destination.
+
+Hot storage has a fixed capacity, typically around the square root of your total checkpoint count. When it fills up, pebble consults the dependency graph to decide what to evict. Evicted checkpoints get serialized and written to cold storage, and when they're needed again pebble deserializes them back into memory.
+
+The cold backend is pluggable through the `ColdTier` trait. If your backend supports it, pebble can also recover from a restart by walking persisted metadata and rebuilding the dependency graph from what it finds on disk.
+
+### See It In Action
+
+<p align="center">
+  <img src="docs/assets/branching.gif" alt="Pebble Demo" />
+</p>
+
 ## Why not an LRU?
 
-An LRU cache evicts whichever item was *least recently used*. That works when every item is equally cheap to recompute. Checkpoints aren't — some are roots that many others depend on, some sit on critical paths, and some are cheap leaves.
+An LRU cache evicts whichever item was *least recently used*. That works when every item is equally cheap to recompute. Checkpoints aren't — some are roots checkpoints depend on, some sit are on critical paths, and some are cheap leaves.
 
 Pebble uses the dependency graph to make eviction decisions:
 

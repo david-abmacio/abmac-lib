@@ -20,6 +20,9 @@ use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, S
 pub use super::direct::DirectStorageError;
 use super::{ColdTier, RecoverableColdTier};
 
+/// Shared error collection across worker threads.
+type SharedErrors<Id, E> = Arc<Mutex<Vec<(Id, E)>>>;
+
 /// Batch of checkpoints to serialize in parallel.
 ///
 /// Passed as the `A` argument to `WorkerPool::run()`. Workers partition
@@ -32,7 +35,7 @@ where
     items: Vec<(T::Id, T)>,
     serializer: Ser,
     num_workers: usize,
-    errors: Arc<Mutex<Vec<(T::Id, Ser::Error)>>>,
+    errors: SharedErrors<T::Id, Ser::Error>,
 }
 
 // SAFETY: SerializeBatch is Sync when T, T::Id, Ser, and Ser::Error are Sync.
@@ -105,7 +108,7 @@ where
     /// Pending items accumulated between `store()` calls.
     pending: Vec<(T::Id, T)>,
     /// Shared error collection across batches.
-    errors: Arc<Mutex<Vec<(T::Id, Ser::Error)>>>,
+    errors: SharedErrors<T::Id, Ser::Error>,
 }
 
 impl<T, S, Ser, const N: usize> ParallelCold<T, S, Ser, N>

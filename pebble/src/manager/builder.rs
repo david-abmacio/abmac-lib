@@ -236,19 +236,20 @@ impl<S, const N: usize> StorageBuilder<S, N> {
     }
 }
 
+/// A `PebbleManager` wired to `RingCold` + `WarmCache` via `BytecastSerializer`.
+#[cfg(all(feature = "bytecast", feature = "cold-buffer"))]
+pub type BufferedManager<T, S, const N: usize> = PebbleManager<
+    T,
+    super::cold::RingCold<<T as Checkpointable>::Id, S, super::BytecastSerializer, N>,
+    super::warm::WarmCache<T>,
+>;
+
 #[cfg(all(feature = "bytecast", feature = "cold-buffer"))]
 impl<S, const N: usize> StorageBuilder<S, N> {
     /// Build a [`PebbleManager`] with `RingCold` and `WarmCache`.
     pub fn build<T>(
         self,
-    ) -> core::result::Result<
-        PebbleManager<
-            T,
-            super::cold::RingCold<T::Id, S, super::BytecastSerializer, N>,
-            super::warm::WarmCache<T>,
-        >,
-        super::error::BuilderError,
-    >
+    ) -> core::result::Result<BufferedManager<T, S, N>, super::error::BuilderError>
     where
         T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
         T::Id: Copy,

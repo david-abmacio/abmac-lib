@@ -43,8 +43,8 @@ fn test_byte_serializer_roundtrip_bool() {
     let bytes_true = serializer.serialize(&true).unwrap();
     let bytes_false = serializer.serialize(&false).unwrap();
 
-    assert_eq!(serializer.deserialize::<bool>(&bytes_true).unwrap(), true);
-    assert_eq!(serializer.deserialize::<bool>(&bytes_false).unwrap(), false);
+    assert!(serializer.deserialize::<bool>(&bytes_true).unwrap());
+    assert!(!serializer.deserialize::<bool>(&bytes_false).unwrap());
 }
 
 #[test]

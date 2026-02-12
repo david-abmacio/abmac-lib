@@ -547,14 +547,14 @@ mod cold_buffer {
     use crate::manager::{RingCold, WarmCache};
     use crate::storage::RecoverableStorage;
 
-    /// Helper: create a RingCold + WarmCache manager for cold-buffer tests.
-    fn test_spill_manager(
-        hot_capacity: usize,
-    ) -> PebbleManager<
+    type BufferedMgr = PebbleManager<
         TestCheckpoint,
         RingCold<u64, InMemoryStorage<u64, u128, 8>, TestSerializer, 64>,
         WarmCache<TestCheckpoint>,
-    > {
+    >;
+
+    /// Helper: create a RingCold + WarmCache manager for cold-buffer tests.
+    fn test_spill_manager(hot_capacity: usize) -> BufferedMgr {
         let cold = RingCold::new(InMemoryStorage::<u64, u128, 8>::new(), TestSerializer);
         let warm = WarmCache::new();
         PebbleManager::new(cold, warm, Strategy::default(), hot_capacity)

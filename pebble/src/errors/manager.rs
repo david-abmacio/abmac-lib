@@ -4,7 +4,7 @@ use alloc::string::String;
 
 use crate::errors::dag::DAGError;
 use crate::errors::storage::StorageError;
-use crate::manager::branch::BranchId;
+use crate::manager::BranchId;
 
 // ── BuilderError ───────────────────────────────────────────────────────
 

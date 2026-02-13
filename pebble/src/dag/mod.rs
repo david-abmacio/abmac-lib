@@ -10,22 +10,8 @@ mod validation;
 use alloc::vec::Vec;
 use core::hash::Hash;
 use hashbrown::{HashMap, HashSet};
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum DAGError {
-        #[display("missing dependency: {dep_id}")]
-        MissingDependency { dep_id: alloc::string::String },
 
-        #[display("self-dependency: {node_id}")]
-        SelfDependency { node_id: alloc::string::String },
-
-        #[display("node exists: {node_id}")]
-        NodeExists { node_id: alloc::string::String },
-
-        #[display("cycle detected: {node_id}")]
-        CycleDetected { node_id: alloc::string::String },
-    }
-}
+pub use crate::errors::dag::DAGError;
 
 /// DAG node representing a compressible state.
 #[derive(Debug, Clone)]

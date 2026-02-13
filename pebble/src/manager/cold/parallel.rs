@@ -179,7 +179,7 @@ where
         match self.errors.lock() {
             Ok(mut errs) => {
                 if let Some((_id, err)) = errs.drain(..).next() {
-                    Err(DirectStorageError::Serializer(err))
+                    Err(DirectStorageError::Serializer { source: err })
                 } else {
                     Ok(())
                 }
@@ -188,7 +188,7 @@ where
                 // Mutex poisoned — a worker panicked. Drain what we can.
                 let mut errs = poisoned.into_inner();
                 if let Some((_id, err)) = errs.drain(..).next() {
-                    Err(DirectStorageError::Serializer(err))
+                    Err(DirectStorageError::Serializer { source: err })
                 } else {
                     Ok(())
                 }
@@ -245,7 +245,7 @@ where
         let bytes = self.storage.load(id)?;
         self.serializer
             .deserialize(&bytes)
-            .map_err(DirectStorageError::Serializer)
+            .map_err(|source| DirectStorageError::Serializer { source })
     }
 
     fn contains(&self, id: T::Id) -> bool {

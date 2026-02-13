@@ -58,6 +58,7 @@
 extern crate alloc;
 
 pub mod dag;
+pub mod errors;
 pub mod game;
 pub mod manager;
 pub mod storage;

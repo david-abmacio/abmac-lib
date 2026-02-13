@@ -88,7 +88,7 @@ where
         let bytes = self
             .serializer
             .serialize(checkpoint)
-            .map_err(DirectStorageError::Serializer)?;
+            .map_err(|source| DirectStorageError::Serializer { source })?;
         self.ring.push_mut((id, bytes));
         Ok(())
     }
@@ -97,7 +97,7 @@ where
         let bytes = self.ring.sink_ref().load(id)?;
         self.serializer
             .deserialize(&bytes)
-            .map_err(DirectStorageError::Serializer)
+            .map_err(|source| DirectStorageError::Serializer { source })
     }
 
     fn contains(&self, id: T::Id) -> bool {

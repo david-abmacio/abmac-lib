@@ -6,11 +6,11 @@
 //!
 //! Rules: R1 Load (blue->red), R2 Store (red->blue), R3 Compute, R4 Delete.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use core::hash::Hash;
 use hashbrown::HashSet;
+
 /// Memory hierarchy: Red (fast) or Blue (slow/serialized).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PebbleColor {
@@ -27,19 +27,7 @@ pub enum PebbleOperation<T> {
     Delete(T),
 }
 
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum PebbleError {
-        #[display("fast memory exhausted: {current}/{max_size}")]
-        FastMemoryExhausted { current: usize, max_size: usize },
-
-        #[display("invalid operation: {operation}")]
-        InvalidOperation { operation: String },
-
-        #[display("node not found: {node}")]
-        NotFound { node: String },
-    }
-}
+pub use crate::errors::game::PebbleError;
 
 pub(crate) type Result<T> = core::result::Result<T, PebbleError>;
 

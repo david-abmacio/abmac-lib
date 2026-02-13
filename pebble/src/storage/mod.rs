@@ -20,28 +20,7 @@ impl SessionId for u128 {}
 impl SessionId for u64 {}
 impl SessionId for () {}
 
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum StorageError {
-        #[display("checkpoint not found")]
-        NotFound,
-
-        #[display("checksum mismatch: expected {expected:#x}, got {actual:#x}")]
-        ChecksumMismatch { expected: u32, actual: u32 },
-
-        #[display("buffer too small: need {required} bytes, got {provided}")]
-        BufferTooSmall { required: usize, provided: usize },
-
-        #[display("I/O error")]
-        Io,
-
-        #[display("backend error: {message}")]
-        Backend { message: &'static str },
-
-        #[display("too many dependencies: maximum {max}, got {count}")]
-        TooManyDependencies { max: usize, count: usize },
-    }
-}
+pub use crate::errors::storage::{IntegrityError, IntegrityErrorKind, StorageError};
 
 /// Load checkpoints from storage. Complement to `Spout` for writes.
 pub trait CheckpointLoader<CId: Copy + Eq + Hash + core::fmt::Debug = u64> {
@@ -195,21 +174,6 @@ pub enum RecoveryMode {
     WarmRestart,
     /// Some checkpoints corrupted but recovered what we could
     PartialRecovery,
-}
-
-/// Checkpoint validation error.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IntegrityError {
-    pub state_id: alloc::string::String,
-    pub kind: IntegrityErrorKind,
-}
-
-/// Types of integrity errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IntegrityErrorKind {
-    ChecksumMismatch { expected: u32, actual: u32 },
-    MissingDependency { dep_id: alloc::string::String },
-    DeserializationFailed,
 }
 
 /// Storage with recovery support.

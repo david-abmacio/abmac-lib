@@ -6,10 +6,9 @@ use core::hash::Hash;
 
 use spout::Spout;
 
+pub use crate::errors::manager::DirectStorageError;
 use crate::manager::traits::{CheckpointSerializer, Checkpointable};
-use crate::storage::{
-    CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId, StorageError,
-};
+use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
 
 use super::{ColdTier, RecoverableColdTier};
 
@@ -59,40 +58,6 @@ impl<S> DirectStorage<S, super::super::BytecastSerializer> {
     }
 }
 
-/// Error type for [`DirectStorage`] operations.
-///
-/// Wraps either a serialization/deserialization error or a storage error.
-pub enum DirectStorageError<SerErr: fmt::Debug + fmt::Display> {
-    /// Serialization or deserialization failed.
-    Serializer(SerErr),
-    /// Storage operation failed.
-    Storage(StorageError),
-}
-
-impl<SerErr: fmt::Debug + fmt::Display> fmt::Debug for DirectStorageError<SerErr> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Serializer(e) => write!(f, "Serializer({e:?})"),
-            Self::Storage(e) => write!(f, "Storage({e:?})"),
-        }
-    }
-}
-
-impl<SerErr: fmt::Debug + fmt::Display> fmt::Display for DirectStorageError<SerErr> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Serializer(e) => write!(f, "serializer error: {e}"),
-            Self::Storage(e) => write!(f, "storage error: {e}"),
-        }
-    }
-}
-
-impl<SerErr: fmt::Debug + fmt::Display> From<StorageError> for DirectStorageError<SerErr> {
-    fn from(e: StorageError) -> Self {
-        Self::Storage(e)
-    }
-}
-
 impl<T, S, Ser> ColdTier<T> for DirectStorage<S, Ser>
 where
     T: Checkpointable,
@@ -105,7 +70,7 @@ where
         let bytes = self
             .serializer
             .serialize(checkpoint)
-            .map_err(DirectStorageError::Serializer)?;
+            .map_err(|source| DirectStorageError::Serializer { source })?;
         let _ = self.storage.send((id, bytes));
         Ok(())
     }
@@ -114,7 +79,7 @@ where
         let bytes = self.storage.load(id)?;
         self.serializer
             .deserialize(&bytes)
-            .map_err(DirectStorageError::Serializer)
+            .map_err(|source| DirectStorageError::Serializer { source })
     }
 
     fn contains(&self, id: T::Id) -> bool {

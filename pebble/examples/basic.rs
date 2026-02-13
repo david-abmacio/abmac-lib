@@ -19,11 +19,6 @@ impl Checkpointable for CounterCheckpoint {
         self.id
     }
 
-    fn dependencies(&self) -> &[u64] {
-        // No dependencies - each checkpoint is independent
-        &[]
-    }
-
     fn compute_from_dependencies(
         base: Self,
         _deps: &hashbrown::HashMap<Self::Id, &Self>,
@@ -68,7 +63,7 @@ fn main() {
             id: i,
             value: i * 100,
         };
-        manager.add(checkpoint).unwrap();
+        manager.add(checkpoint, &[]).unwrap();
         println!("Added checkpoint {}: value = {}", i, i * 100);
     }
 

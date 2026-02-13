@@ -70,11 +70,15 @@ where
     ///
     /// Consumes the guard. Returns a [`CheckpointRef`] for the new checkpoint.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn store(self, checkpoint: T) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
+    pub fn store(
+        self,
+        checkpoint: T,
+        dependencies: &[T::Id],
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
         let mgr = self.manager;
         let state_id = checkpoint.checkpoint_id();
 
-        mgr.dag.add_node(state_id, checkpoint.dependencies())?;
+        mgr.dag.add_node(state_id, dependencies)?;
         mgr.red_pebbles.insert(state_id, checkpoint);
         mgr.checkpoints_added = mgr.checkpoints_added.saturating_add(1);
         mgr.track_new_checkpoint(state_id);
@@ -89,10 +93,14 @@ where
     ///
     /// Consumes the guard. Returns a [`CheckpointRef`] for the new checkpoint.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert<F>(self, constructor: F) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
+    pub fn insert<F>(
+        self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
-        self.store(constructor())
+        self.store(constructor(), dependencies)
     }
 }

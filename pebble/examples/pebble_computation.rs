@@ -89,11 +89,13 @@ fn main() {
                 });
             }
             Action::Save { id } => {
-                mgr.add(Checkpoint {
-                    id: *id,
-                    value: val,
-                    deps: vec![],
-                })
+                mgr.add(
+                    Checkpoint {
+                        id: *id,
+                        value: val,
+                    },
+                    &[],
+                )
                 .unwrap();
                 if let Some(last) = flow.last_mut() {
                     last.cp_id = Some(*id);

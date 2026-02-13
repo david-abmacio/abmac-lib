@@ -53,7 +53,6 @@ macro_rules! row {
 pub struct Checkpoint {
     pub id: u64,
     pub value: u64,
-    pub deps: Vec<u64>,
 }
 
 impl Checkpointable for Checkpoint {
@@ -62,10 +61,6 @@ impl Checkpointable for Checkpoint {
 
     fn checkpoint_id(&self) -> u64 {
         self.id
-    }
-
-    fn dependencies(&self) -> &[u64] {
-        &self.deps
     }
 
     fn compute_from_dependencies(
@@ -84,34 +79,19 @@ impl CheckpointSerializer<Checkpoint> for Ser {
     type Error = &'static str;
 
     fn serialize(&self, cp: &Checkpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        let mut b = Vec::with_capacity(32);
+        let mut b = Vec::with_capacity(16);
         b.extend_from_slice(&cp.id.to_be_bytes());
         b.extend_from_slice(&cp.value.to_be_bytes());
-        b.extend_from_slice(&(cp.deps.len() as u64).to_be_bytes());
-        for d in &cp.deps {
-            b.extend_from_slice(&d.to_be_bytes());
-        }
         Ok(b)
     }
 
     fn deserialize(&self, b: &[u8]) -> core::result::Result<Checkpoint, Self::Error> {
-        if b.len() < 24 {
+        if b.len() < 16 {
             return Err("too small");
         }
         let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
-        let val = u64::from_be_bytes(b[8..16].try_into().unwrap());
-        let n = u64::from_be_bytes(b[16..24].try_into().unwrap()) as usize;
-        let mut deps = Vec::with_capacity(n);
-        for i in 0..n {
-            deps.push(u64::from_be_bytes(
-                b[24 + i * 8..32 + i * 8].try_into().unwrap(),
-            ));
-        }
-        Ok(Checkpoint {
-            id,
-            value: val,
-            deps,
-        })
+        let value = u64::from_be_bytes(b[8..16].try_into().unwrap());
+        Ok(Checkpoint { id, value })
     }
 }
 

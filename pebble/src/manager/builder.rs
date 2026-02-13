@@ -32,7 +32,6 @@ const DEFAULT_RING_BUFFER_CAPACITY: usize = 64;
 /// #     type Id = u64;
 /// #     type RebuildError = ();
 /// #     fn checkpoint_id(&self) -> u64 { self.id }
-/// #     fn dependencies(&self) -> &[u64] { &[] }
 /// #     fn compute_from_dependencies(
 /// #         base: Self, _deps: &hashbrown::HashMap<Self::Id, &Self>,
 /// #     ) -> Result<Self, Self::RebuildError> { Ok(base) }

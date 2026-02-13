@@ -15,7 +15,6 @@ use crate::strategy::Strategy;
 struct TestCheckpoint {
     id: u64,
     data: alloc::string::String,
-    deps: Vec<u64>,
 }
 
 impl Checkpointable for TestCheckpoint {
@@ -24,10 +23,6 @@ impl Checkpointable for TestCheckpoint {
 
     fn checkpoint_id(&self) -> Self::Id {
         self.id
-    }
-
-    fn dependencies(&self) -> &[Self::Id] {
-        &self.deps
     }
 
     fn compute_from_dependencies(
@@ -47,10 +42,6 @@ impl CheckpointSerializer<TestCheckpoint> for TestSerializer {
         let data_bytes = cp.data.as_bytes();
         b.extend_from_slice(&(data_bytes.len() as u32).to_be_bytes());
         b.extend_from_slice(data_bytes);
-        b.extend_from_slice(&(cp.deps.len() as u32).to_be_bytes());
-        for d in &cp.deps {
-            b.extend_from_slice(&d.to_be_bytes());
-        }
         Ok(b)
     }
     fn deserialize(&self, b: &[u8]) -> core::result::Result<TestCheckpoint, Self::Error> {
@@ -60,15 +51,7 @@ impl CheckpointSerializer<TestCheckpoint> for TestSerializer {
         let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
         let data_len = u32::from_be_bytes(b[8..12].try_into().unwrap()) as usize;
         let data = alloc::string::String::from_utf8(b[12..12 + data_len].to_vec()).unwrap();
-        let dep_offset = 12 + data_len;
-        let dep_count =
-            u32::from_be_bytes(b[dep_offset..dep_offset + 4].try_into().unwrap()) as usize;
-        let mut deps = Vec::with_capacity(dep_count);
-        for i in 0..dep_count {
-            let start = dep_offset + 4 + i * 8;
-            deps.push(u64::from_be_bytes(b[start..start + 8].try_into().unwrap()));
-        }
-        Ok(TestCheckpoint { id, data, deps })
+        Ok(TestCheckpoint { id, data })
     }
 }
 
@@ -80,22 +63,13 @@ fn cp(id: u64) -> TestCheckpoint {
     TestCheckpoint {
         id,
         data: alloc::format!("cp-{id}"),
-        deps: vec![],
-    }
-}
-
-fn cp_dep(id: u64, dep: u64) -> TestCheckpoint {
-    TestCheckpoint {
-        id,
-        data: alloc::format!("cp-{id}"),
-        deps: vec![dep],
     }
 }
 
 #[test]
 fn branching_disabled_by_default() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     assert!(mgr.active_branch().is_none());
     assert!(mgr.branch_of(1).is_none());
     assert!(mgr.branches().is_none());
@@ -104,8 +78,8 @@ fn branching_disabled_by_default() {
 #[test]
 fn enable_branching_assigns_existing_to_head() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
-    mgr.add(cp(1)).unwrap();
-    mgr.add(cp(2)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
+    mgr.add(cp(2), &[]).unwrap();
 
     mgr.enable_branching();
 
@@ -123,7 +97,7 @@ fn enable_branching_assigns_existing_to_head() {
 fn enable_branching_idempotent() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     mgr.enable_branching(); // second call is no-op
     assert_eq!(mgr.branch_of(1), Some(HEAD));
 }
@@ -133,8 +107,8 @@ fn add_assigns_to_active_branch() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
 
-    mgr.add(cp(1)).unwrap();
-    mgr.add(cp(2)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
+    mgr.add(cp(2), &[]).unwrap();
 
     assert_eq!(mgr.branch_of(1), Some(HEAD));
     assert_eq!(mgr.branch_of(2), Some(HEAD));
@@ -147,9 +121,9 @@ fn add_assigns_to_active_branch() {
 fn fork_creates_branch() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
-    mgr.add(cp_dep(2, 1)).unwrap();
-    mgr.add(cp_dep(3, 2)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
+    mgr.add(cp(2), &[1]).unwrap();
+    mgr.add(cp(3), &[2]).unwrap();
 
     let branch = mgr.fork(2, "experiment").unwrap();
 
@@ -164,13 +138,13 @@ fn fork_creates_branch() {
 fn fork_switches_active_branch() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
 
     let branch = mgr.fork(1, "alt").unwrap();
     assert_eq!(mgr.active_branch(), Some(branch));
 
     // New adds go to the new branch.
-    mgr.add(cp_dep(2, 1)).unwrap();
+    mgr.add(cp(2), &[1]).unwrap();
     assert_eq!(mgr.branch_of(2), Some(branch));
     assert_eq!(mgr.branch_of(1), Some(HEAD)); // unchanged
 }
@@ -179,7 +153,7 @@ fn fork_switches_active_branch() {
 fn switch_branch() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     let branch = mgr.fork(1, "alt").unwrap();
 
     mgr.switch_branch(HEAD).unwrap();
@@ -222,9 +196,9 @@ fn fork_nonexistent_checkpoint() {
 fn branch_lineage() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     let b1 = mgr.fork(1, "b1").unwrap();
-    mgr.add(cp_dep(2, 1)).unwrap();
+    mgr.add(cp(2), &[1]).unwrap();
     let b2 = mgr.fork(2, "b2").unwrap();
 
     let lineage = mgr.branch_lineage(b2).unwrap();
@@ -238,7 +212,7 @@ fn branch_lineage() {
 fn forks_at() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
 
     let b1 = mgr.fork(1, "b1").unwrap();
     mgr.switch_branch(HEAD).unwrap();
@@ -256,7 +230,7 @@ fn forks_at() {
 fn remove_cleans_branch_tracker() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     assert_eq!(mgr.branch_of(1), Some(HEAD));
 
     mgr.remove(1);
@@ -267,7 +241,7 @@ fn remove_cleans_branch_tracker() {
 fn branches_lists_all() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
     mgr.fork(1, "alt").unwrap();
 
     let branches = mgr.branches().unwrap();
@@ -282,7 +256,7 @@ fn branches_lists_all() {
 fn duplicate_branch_name_rejected() {
     let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
     mgr.enable_branching();
-    mgr.add(cp(1)).unwrap();
+    mgr.add(cp(1), &[]).unwrap();
 
     mgr.fork(1, "experiment").unwrap();
     mgr.switch_branch(HEAD).unwrap();

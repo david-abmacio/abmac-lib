@@ -15,7 +15,6 @@ use crate::strategy::Strategy;
 struct TestCheckpoint {
     id: u64,
     data: alloc::string::String,
-    deps: Vec<u64>,
 }
 
 impl Checkpointable for TestCheckpoint {
@@ -24,10 +23,6 @@ impl Checkpointable for TestCheckpoint {
 
     fn checkpoint_id(&self) -> Self::Id {
         self.id
-    }
-
-    fn dependencies(&self) -> &[Self::Id] {
-        &self.deps
     }
 
     fn compute_from_dependencies(
@@ -63,45 +58,23 @@ impl CheckpointSerializer<TestCheckpoint> for TestSerializer {
     type Error = TestSerializerError;
 
     fn serialize(&self, value: &TestCheckpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        // Format: id (8) + dep_count (4) + deps (8 each) + data
+        // Format: id (8) + data
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&value.id.to_le_bytes());
-        bytes.extend_from_slice(&(value.deps.len() as u32).to_le_bytes());
-        for dep in &value.deps {
-            bytes.extend_from_slice(&dep.to_le_bytes());
-        }
         bytes.extend_from_slice(value.data.as_bytes());
         Ok(bytes)
     }
 
     fn deserialize(&self, bytes: &[u8]) -> core::result::Result<TestCheckpoint, Self::Error> {
-        // Need at least id (8) + dep_count (4) = 12 bytes
-        if bytes.len() < 12 {
+        if bytes.len() < 8 {
             return Err(TestSerializerError::TooShort {
-                expected: 12,
+                expected: 8,
                 actual: bytes.len(),
             });
         }
         let id = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        let dep_count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-
-        let deps_end = 12 + dep_count * 8;
-        if bytes.len() < deps_end {
-            return Err(TestSerializerError::TooShort {
-                expected: deps_end,
-                actual: bytes.len(),
-            });
-        }
-
-        let mut deps = Vec::with_capacity(dep_count);
-        for i in 0..dep_count {
-            let start = 12 + i * 8;
-            let dep = u64::from_le_bytes(bytes[start..start + 8].try_into().unwrap());
-            deps.push(dep);
-        }
-
-        let data = alloc::string::String::from_utf8_lossy(&bytes[deps_end..]).into_owned();
-        Ok(TestCheckpoint { id, data, deps })
+        let data = alloc::string::String::from_utf8_lossy(&bytes[8..]).into_owned();
+        Ok(TestCheckpoint { id, data })
     }
 }
 
@@ -119,10 +92,9 @@ fn test_basic_add_and_get() {
     let cp = TestCheckpoint {
         id: 1,
         data: "test".into(),
-        deps: vec![],
     };
 
-    manager.add(cp).unwrap();
+    manager.add(cp, &[]).unwrap();
     assert!(manager.is_hot(1));
     assert_eq!(manager.get(1).unwrap().data, "test");
 }
@@ -133,10 +105,9 @@ fn test_insert_zero_copy() {
 
     // Use insert with constructor closure
     let id = manager
-        .insert(|| TestCheckpoint {
+        .insert(&[], || TestCheckpoint {
             id: 42,
             data: "constructed".into(),
-            deps: vec![],
         })
         .unwrap();
 
@@ -151,19 +122,20 @@ fn test_insert_with_dependencies() {
 
     // Add parent checkpoint
     manager
-        .add(TestCheckpoint {
-            id: 1,
-            data: "parent".into(),
-            deps: vec![],
-        })
+        .add(
+            TestCheckpoint {
+                id: 1,
+                data: "parent".into(),
+            },
+            &[],
+        )
         .unwrap();
 
     // Insert child with dependency using closure
     let child_id = manager
-        .insert(|| TestCheckpoint {
+        .insert(&[1], || TestCheckpoint {
             id: 2,
             data: "child".into(),
-            deps: vec![1],
         })
         .unwrap();
 
@@ -181,9 +153,8 @@ fn test_eviction() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     // Some should have been evicted
@@ -204,9 +175,8 @@ fn test_load_from_storage() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     // Flush so evicted items reach cold storage
@@ -236,9 +206,8 @@ fn test_compress() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     // All in fast memory
@@ -266,9 +235,8 @@ fn test_stats() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     let stats = manager.stats();
@@ -289,9 +257,9 @@ fn test_rebuild_simple() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: if i > 0 { vec![i - 1] } else { vec![] },
         };
-        manager.add(cp).unwrap();
+        let deps = if i > 0 { vec![i - 1] } else { vec![] };
+        manager.add(cp, &deps).unwrap();
     }
 
     // With hot_capacity=2, some should be evicted
@@ -316,9 +284,8 @@ fn test_rebuild_from_hot() {
     let cp = TestCheckpoint {
         id: 1,
         data: "test".into(),
-        deps: vec![],
     };
-    manager.add(cp).unwrap();
+    manager.add(cp, &[]).unwrap();
 
     // Rebuild from fast memory should work
     let rebuilt = manager.rebuild(1).unwrap();
@@ -348,9 +315,8 @@ fn test_theoretical_validation_space_bound() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     let validation = manager.validate_theoretical_bounds();
@@ -381,9 +347,8 @@ fn test_theoretical_validation_space_bound_exceeded() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     let validation = manager.validate_theoretical_bounds();
@@ -407,9 +372,8 @@ fn test_theoretical_validation_io_bound() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     manager.flush().unwrap();
@@ -469,9 +433,8 @@ fn test_recover_warm_restart() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
-            deps: vec![],
         };
-        manager.add(cp).unwrap();
+        manager.add(cp, &[]).unwrap();
     }
 
     // Force eviction to storage
@@ -512,9 +475,9 @@ fn test_recover_with_dependencies() {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("chain{i}"),
-            deps: if i > 0 { vec![i - 1] } else { vec![] },
         };
-        manager.add(cp).unwrap();
+        let deps = if i > 0 { vec![i - 1] } else { vec![] };
+        manager.add(cp, &deps).unwrap();
     }
 
     // Force to storage - compress until no more can be evicted
@@ -575,11 +538,13 @@ mod cold_buffer {
 
         for i in 0..5 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -594,11 +559,13 @@ mod cold_buffer {
 
         for i in 0..4 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -628,11 +595,13 @@ mod cold_buffer {
 
         for i in 0..5 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -651,12 +620,15 @@ mod cold_buffer {
 
         // Chain: 0 -> 1 -> 2 -> 3
         for i in 0..4 {
+            let deps = if i > 0 { vec![i - 1] } else { vec![] };
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: if i > 0 { vec![i - 1] } else { vec![] },
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &deps,
+                )
                 .unwrap();
         }
 
@@ -680,11 +652,13 @@ mod cold_buffer {
 
         for i in 0..4 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -702,11 +676,13 @@ mod cold_buffer {
 
         for i in 0..4 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -727,11 +703,13 @@ mod cold_buffer {
 
         for i in 0..4 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -752,11 +730,13 @@ mod cold_buffer {
         // We need 67+ adds to trigger warm overflow into write buffer.
         for i in 0..70 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -793,11 +773,13 @@ mod cold_buffer {
         // Fill warm, then flush to push through write buffer to storage
         for i in 0..10 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -820,11 +802,13 @@ mod cold_buffer {
 
         for i in 0..6 {
             manager
-                .add(TestCheckpoint {
-                    id: i,
-                    data: alloc::format!("data{i}"),
-                    deps: vec![],
-                })
+                .add(
+                    TestCheckpoint {
+                        id: i,
+                        data: alloc::format!("data{i}"),
+                    },
+                    &[],
+                )
                 .unwrap();
         }
 
@@ -877,11 +861,13 @@ fn hint_total_checkpoints_computes_sqrt() {
 
     for i in 0..100 {
         manager
-            .add(TestCheckpoint {
-                id: i,
-                data: alloc::format!("data{i}"),
-                deps: vec![],
-            })
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
             .unwrap();
     }
     // 100 items, hot_capacity=100: all in hot, none evicted
@@ -890,11 +876,13 @@ fn hint_total_checkpoints_computes_sqrt() {
 
     // 101st triggers eviction
     manager
-        .add(TestCheckpoint {
-            id: 100,
-            data: "overflow".into(),
-            deps: vec![],
-        })
+        .add(
+            TestCheckpoint {
+                id: 100,
+                data: "overflow".into(),
+            },
+            &[],
+        )
         .unwrap();
     assert!(manager.stats().blue_pebble_count() > 0 || manager.stats().red_pebble_count() <= 100);
 }
@@ -919,11 +907,13 @@ fn builder_warm_capacity_configurable() {
     // Adds 0..6: 4 hot, 2 warm (full)
     for i in 0..6 {
         manager
-            .add(TestCheckpoint {
-                id: i,
-                data: alloc::format!("data{i}"),
-                deps: vec![],
-            })
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
             .unwrap();
     }
 
@@ -933,11 +923,13 @@ fn builder_warm_capacity_configurable() {
 
     // 7th add overflows warm -> write buffer
     manager
-        .add(TestCheckpoint {
-            id: 6,
-            data: "overflow".into(),
-            deps: vec![],
-        })
+        .add(
+            TestCheckpoint {
+                id: 6,
+                data: "overflow".into(),
+            },
+            &[],
+        )
         .unwrap();
 
     let stats = manager.stats();

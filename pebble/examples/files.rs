@@ -28,9 +28,6 @@ impl Checkpointable for Snapshot {
     fn checkpoint_id(&self) -> u64 {
         self.id
     }
-    fn dependencies(&self) -> &[u64] {
-        &[]
-    }
     fn compute_from_dependencies(
         base: Self,
         _deps: &hashbrown::HashMap<u64, &Self>,
@@ -109,7 +106,7 @@ fn main() {
                 id: i,
                 payload: vec![i as u8; 64],
             };
-            manager.add(cp).unwrap();
+            manager.add(cp, &[]).unwrap();
 
             let stats = manager.stats();
             println!(

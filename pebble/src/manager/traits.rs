@@ -15,9 +15,6 @@ pub trait Checkpointable: Sized + Clone {
     /// Get the checkpoint's unique identifier.
     fn checkpoint_id(&self) -> Self::Id;
 
-    /// Get IDs of checkpoints this one depends on.
-    fn dependencies(&self) -> &[Self::Id];
-
     /// Rebuild this checkpoint from its dependencies.
     ///
     /// Called during state rebuild when a checkpoint is loaded from storage.

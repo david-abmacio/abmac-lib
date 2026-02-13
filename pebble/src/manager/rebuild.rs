@@ -42,10 +42,14 @@ where
 
         if let Some(checkpoint) = self.red_pebbles.get(&state_id).cloned() {
             self.dag.mark_accessed(state_id);
-            if checkpoint.dependencies().is_empty() {
+            let deps = self
+                .dag
+                .get_node(state_id)
+                .map_or(&[][..], |n| n.dependencies());
+            if deps.is_empty() {
                 return Ok(checkpoint);
             }
-            let dep_refs = self.collect_dependency_refs(checkpoint.dependencies(), state_id)?;
+            let dep_refs = self.collect_dependency_refs(deps, state_id)?;
             return Self::compute_from_deps(checkpoint, &dep_refs, state_id);
         }
 
@@ -86,8 +90,12 @@ where
         for node_id in load_order {
             let base_state = self.resolve_base_state(node_id)?;
             let computed = {
-                let dep_refs =
-                    self.collect_mixed_refs(base_state.dependencies(), &workspace, node_id)?;
+                let deps: Vec<T::Id> = self
+                    .dag
+                    .get_node(node_id)
+                    .map(|n| n.dependencies().to_vec())
+                    .unwrap_or_default();
+                let dep_refs = self.collect_mixed_refs(&deps, &workspace, node_id)?;
                 Self::compute_from_deps(base_state, &dep_refs, node_id)?
             };
             workspace.insert(node_id, computed);

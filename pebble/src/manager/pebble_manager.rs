@@ -96,9 +96,8 @@ where
     /// so mutating a checkpoint after insertion would silently corrupt any
     /// downstream rebuild that depends on it.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn add(&mut self, checkpoint: T) -> Result<(), T::Id, C::Error> {
+    pub fn add(&mut self, checkpoint: T, dependencies: &[T::Id]) -> Result<(), T::Id, C::Error> {
         let state_id = checkpoint.checkpoint_id();
-        let dependencies = checkpoint.dependencies();
 
         // Add to DAG (validates dependencies exist)
         self.dag.add_node(state_id, dependencies)?;
@@ -120,7 +119,11 @@ where
 
     /// Insert a checkpoint using a deferred constructor. Eviction happens before construction.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert<F>(&mut self, constructor: F) -> Result<T::Id, T::Id, C::Error>
+    pub fn insert<F>(
+        &mut self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<T::Id, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
@@ -133,9 +136,8 @@ where
         let checkpoint = constructor();
         let state_id = checkpoint.checkpoint_id();
 
-        // Add to DAG — always use the checkpoint's own dependencies
-        // to keep the DAG consistent with compute_from_dependencies.
-        self.dag.add_node(state_id, checkpoint.dependencies())?;
+        // Add to DAG (validates dependencies exist)
+        self.dag.add_node(state_id, dependencies)?;
 
         // Add to fast memory
         self.red_pebbles.insert(state_id, checkpoint);
@@ -150,19 +152,27 @@ where
 
     /// Like [`add`](Self::add), but also returns a [`CheckpointRef`] token.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn add_ref(&mut self, checkpoint: T) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
+    pub fn add_ref(
+        &mut self,
+        checkpoint: T,
+        dependencies: &[T::Id],
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
         let state_id = checkpoint.checkpoint_id();
-        self.add(checkpoint)?;
+        self.add(checkpoint, dependencies)?;
         Ok(CheckpointRef::new(state_id))
     }
 
     /// Like [`insert`](Self::insert), but also returns a [`CheckpointRef`] token.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert_ref<F>(&mut self, constructor: F) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
+    pub fn insert_ref<F>(
+        &mut self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
-        let id = self.insert(constructor)?;
+        let id = self.insert(dependencies, constructor)?;
         Ok(CheckpointRef::new(id))
     }
 
@@ -196,6 +206,13 @@ where
             self.evict_red_pebbles()?;
         }
         Ok(CapacityGuard::new(self))
+    }
+
+    /// Get the dependency list for a checkpoint. Returns `None` if the checkpoint
+    /// is not in the DAG.
+    #[inline]
+    pub fn dependencies(&self, state_id: T::Id) -> Option<&[T::Id]> {
+        self.dag.get_node(state_id).map(|n| n.dependencies())
     }
 
     /// Get a checkpoint in fast memory. Returns `None` if not in fast memory.

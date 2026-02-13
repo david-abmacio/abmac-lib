@@ -22,7 +22,6 @@
 //!     type Id = u64;
 //!     type RebuildError = ();
 //!     fn checkpoint_id(&self) -> u64 { self.id }
-//!     fn dependencies(&self) -> &[u64] { &[] }
 //!     fn compute_from_dependencies(
 //!         base: Self, _deps: &hashbrown::HashMap<Self::Id, &Self>,
 //!     ) -> Result<Self, Self::RebuildError> { Ok(base) }
@@ -45,7 +44,7 @@
 //!     .build::<MyCheckpoint>()
 //!     .unwrap();
 //!
-//! manager.add(MyCheckpoint { id: 1, data: vec![1, 2, 3] }).unwrap();
+//! manager.add(MyCheckpoint { id: 1, data: vec![1, 2, 3] }, &[]).unwrap();
 //! ```
 //!
 //! # Thread Safety

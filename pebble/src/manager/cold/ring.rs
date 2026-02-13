@@ -140,7 +140,7 @@ where
 /// Iterator adapter for [`RingCold::iter_metadata`].
 pub struct RingMetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
 where
-    CId: Copy + Eq + Hash + core::fmt::Debug + 'a,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug + 'a,
     S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
     SId: SessionId + 'a,
 {
@@ -150,7 +150,7 @@ where
 impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator
     for RingMetadataIter<'a, CId, S, SId, MAX_DEPS>
 where
-    CId: Copy + Eq + Hash + core::fmt::Debug,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug,
     S: RecoverableStorage<CId, SId, MAX_DEPS>,
     SId: SessionId,
 {

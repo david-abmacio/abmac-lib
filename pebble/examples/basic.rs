@@ -108,8 +108,8 @@ fn main() {
     println!("\n--- Statistics ---\n");
 
     let stats = manager.stats();
-    println!("Checkpoints added: {}", stats.checkpoints_added);
-    println!("Red pebbles (fast): {}", stats.red_pebble_count);
-    println!("Blue pebbles (storage): {}", stats.blue_pebble_count);
-    println!("I/O operations: {}", stats.io_operations);
+    println!("Checkpoints added: {}", stats.checkpoints_added());
+    println!("Red pebbles (fast): {}", stats.red_pebble_count());
+    println!("Blue pebbles (storage): {}", stats.blue_pebble_count());
+    println!("I/O operations: {}", stats.io_operations());
 }

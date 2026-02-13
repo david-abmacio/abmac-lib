@@ -261,6 +261,12 @@ impl<S, const N: usize> StorageBuilder<S, N> {
 
         let cold = super::cold::RingCold::with_storage(self.storage);
         let warm_cap = self.warm_capacity.unwrap_or(self.hot_capacity);
+        debug_assert!(
+            warm_cap <= self.hot_capacity,
+            "warm_capacity ({warm_cap}) should not exceed hot_capacity ({}); \
+             increase hot_capacity instead",
+            self.hot_capacity,
+        );
         let warm = super::warm::WarmCache::with_capacity(warm_cap);
 
         Ok(PebbleManager::new(

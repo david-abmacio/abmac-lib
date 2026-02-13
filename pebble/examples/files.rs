@@ -111,11 +111,11 @@ fn main() {
             let stats = manager.stats();
             println!(
                 "add({i:>2})  hot={:<2} warm={:<2} buf={:<2} disk={:<2}  io={}",
-                stats.red_pebble_count,
-                stats.warm_count,
-                stats.write_buffer_count,
-                stats.blue_pebble_count,
-                stats.io_operations,
+                stats.red_pebble_count(),
+                stats.warm_count(),
+                stats.write_buffer_count(),
+                stats.blue_pebble_count(),
+                stats.io_operations(),
             );
         }
 
@@ -125,11 +125,11 @@ fn main() {
         let stats = manager.stats();
         println!(
             "After flush:  hot={}  warm={}  buf={}  disk={}  io={}",
-            stats.red_pebble_count,
-            stats.warm_count,
-            stats.write_buffer_count,
-            stats.blue_pebble_count,
-            stats.io_operations,
+            stats.red_pebble_count(),
+            stats.warm_count(),
+            stats.write_buffer_count(),
+            stats.blue_pebble_count(),
+            stats.io_operations(),
         );
         let file_count = fs::read_dir(&dir).unwrap().count();
         println!("Files on disk: {}", file_count);
@@ -137,9 +137,9 @@ fn main() {
         println!("\n--- Load from disk ---\n");
 
         // Load checkpoint 1 back from disk into hot tier.
-        let io_before = manager.stats().io_operations;
+        let io_before = manager.stats().io_operations();
         let cp = manager.load(1).unwrap().clone();
-        let io_after = manager.stats().io_operations;
+        let io_after = manager.stats().io_operations();
         println!(
             "Loaded checkpoint {}: {} bytes payload, {} I/O",
             cp.id,

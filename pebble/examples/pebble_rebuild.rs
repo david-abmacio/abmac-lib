@@ -239,9 +239,9 @@ fn main() {
     let s = mgr.stats();
     println!(
         "\n  {BOLD}Done.{RESET} {DIM}Checkpoints: {}  I/O: {}  Utilization: {:.0}%{RESET}\n",
-        s.checkpoints_added,
-        s.io_operations,
-        s.hot_utilization * 100.0,
+        s.checkpoints_added(),
+        s.io_operations(),
+        s.hot_utilization() * 100.0,
     );
 }
 
@@ -301,7 +301,7 @@ fn render(
         &mut buf,
         &hot,
         &cold,
-        stats.red_pebble_count,
+        stats.red_pebble_count(),
         HOT_CAPACITY,
         |id, color| {
             if let Some(cp) = mgr.get(id) {
@@ -339,9 +339,9 @@ fn render(
     row!(
         buf,
         "  {DIM}I/O: {}    Checkpoints: {}    Utilization: {:.0}%{RESET}",
-        stats.io_operations,
-        stats.checkpoints_added,
-        stats.hot_utilization * 100.0
+        stats.io_operations(),
+        stats.checkpoints_added(),
+        stats.hot_utilization() * 100.0
     );
     row!(buf);
 

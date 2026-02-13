@@ -4,16 +4,95 @@
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct PebbleStats {
-    pub checkpoints_added: u64,
-    pub red_pebble_count: usize,
-    pub blue_pebble_count: usize,
-    pub warm_count: usize,
-    pub write_buffer_count: usize,
-    pub io_operations: u64,
-    pub hot_utilization: f64,
-    pub theoretical_min_io: u64,
-    pub io_optimality_ratio: f64,
-    pub space_complexity_ratio: f64,
+    checkpoints_added: u64,
+    red_pebble_count: usize,
+    blue_pebble_count: usize,
+    warm_count: usize,
+    write_buffer_count: usize,
+    io_operations: u64,
+    hot_utilization: f64,
+    theoretical_min_io: u64,
+    io_optimality_ratio: f64,
+    space_complexity_ratio: f64,
+}
+
+impl PebbleStats {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        checkpoints_added: u64,
+        red_pebble_count: usize,
+        blue_pebble_count: usize,
+        warm_count: usize,
+        write_buffer_count: usize,
+        io_operations: u64,
+        hot_utilization: f64,
+        theoretical_min_io: u64,
+        io_optimality_ratio: f64,
+        space_complexity_ratio: f64,
+    ) -> Self {
+        Self {
+            checkpoints_added,
+            red_pebble_count,
+            blue_pebble_count,
+            warm_count,
+            write_buffer_count,
+            io_operations,
+            hot_utilization,
+            theoretical_min_io,
+            io_optimality_ratio,
+            space_complexity_ratio,
+        }
+    }
+
+    #[inline]
+    pub fn checkpoints_added(&self) -> u64 {
+        self.checkpoints_added
+    }
+
+    #[inline]
+    pub fn red_pebble_count(&self) -> usize {
+        self.red_pebble_count
+    }
+
+    #[inline]
+    pub fn blue_pebble_count(&self) -> usize {
+        self.blue_pebble_count
+    }
+
+    #[inline]
+    pub fn warm_count(&self) -> usize {
+        self.warm_count
+    }
+
+    #[inline]
+    pub fn write_buffer_count(&self) -> usize {
+        self.write_buffer_count
+    }
+
+    #[inline]
+    pub fn io_operations(&self) -> u64 {
+        self.io_operations
+    }
+
+    #[inline]
+    pub fn hot_utilization(&self) -> f64 {
+        self.hot_utilization
+    }
+
+    #[inline]
+    pub fn theoretical_min_io(&self) -> u64 {
+        self.theoretical_min_io
+    }
+
+    #[inline]
+    pub fn io_optimality_ratio(&self) -> f64 {
+        self.io_optimality_ratio
+    }
+
+    #[inline]
+    pub fn space_complexity_ratio(&self) -> f64 {
+        self.space_complexity_ratio
+    }
 }
 
 /// Red-Blue Pebble Game theoretical bounds validation.

@@ -6,5 +6,6 @@ mod branch;
 mod dag;
 mod game;
 mod manager;
+mod safety;
 mod storage;
 mod strategy;

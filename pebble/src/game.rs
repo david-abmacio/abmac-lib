@@ -224,6 +224,7 @@ impl<T: Copy + Eq + Hash + fmt::Debug> PebbleGame<T> {
         self.blue_pebbles.contains(&node)
     }
 
+    #[must_use = "validation result should be checked"]
     pub fn validate_invariants(&self) -> Result<()> {
         if self.red_pebbles.len() > self.max_red_pebbles {
             return Err(PebbleError::FastMemoryExhausted {

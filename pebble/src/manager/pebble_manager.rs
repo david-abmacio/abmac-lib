@@ -8,6 +8,7 @@ use crate::strategy::Strategy;
 
 use super::cold::ColdTier;
 use super::error::{PebbleManagerError, Result};
+use super::safety::{CapacityGuard, CheckpointRef};
 use super::stats::{PebbleStats, TheoreticalValidation};
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
@@ -31,7 +32,9 @@ pub(super) const DAG_IO_BOUND: f64 = 3.0;
 /// - `C` — Cold tier (serialization + storage)
 /// - `W` — Warm tier (unserialized eviction buffer)
 ///
-/// Not thread-safe. Wrap in `Mutex` or `RwLock` for concurrent access.
+/// Not internally synchronized. For concurrent access, wrap in a
+/// `Mutex` or `RwLock`. `PebbleManager` is `Send` when all type
+/// parameters (`T`, `C`, `W`) are `Send`.
 #[must_use]
 pub struct PebbleManager<T, C, W>
 where
@@ -143,6 +146,56 @@ where
         self.debug_place_red(state_id);
 
         Ok(state_id)
+    }
+
+    /// Like [`add`](Self::add), but also returns a [`CheckpointRef`] token.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn add_ref(&mut self, checkpoint: T) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
+        let state_id = checkpoint.checkpoint_id();
+        self.add(checkpoint)?;
+        Ok(CheckpointRef::new(state_id))
+    }
+
+    /// Like [`insert`](Self::insert), but also returns a [`CheckpointRef`] token.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn insert_ref<F>(&mut self, constructor: F) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
+    where
+        F: FnOnce() -> T,
+    {
+        let id = self.insert(constructor)?;
+        Ok(CheckpointRef::new(id))
+    }
+
+    /// Probe for a checkpoint across all tiers. Returns a token if found.
+    ///
+    /// Replaces the pattern `if manager.contains(id) { ... }` with a token
+    /// that can flow into [`load_ref`](Self::load_ref) or
+    /// [`rebuild_ref`](Self::rebuild_ref).
+    pub fn locate(&self, state_id: T::Id) -> Option<CheckpointRef<T::Id>> {
+        if self.contains(state_id) {
+            Some(CheckpointRef::new(state_id))
+        } else {
+            None
+        }
+    }
+
+    /// Like [`load`](Self::load), but takes a [`CheckpointRef`] instead of a raw ID.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn load_ref(&mut self, token: CheckpointRef<T::Id>) -> Result<&T, T::Id, C::Error> {
+        self.load(token.id())
+    }
+
+    /// Ensure at least one slot is free in the hot tier.
+    ///
+    /// Evicts if necessary. Returns a [`CapacityGuard`] proving capacity
+    /// exists. The guard borrows the manager mutably, so no other mutation
+    /// can invalidate the guarantee before the guard is consumed.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn ensure_capacity(&mut self) -> Result<CapacityGuard<'_, T, C, W>, T::Id, C::Error> {
+        if self.red_pebbles.len() >= self.hot_capacity {
+            self.evict_red_pebbles()?;
+        }
+        Ok(CapacityGuard::new(self))
     }
 
     /// Get a checkpoint in fast memory. Returns `None` if not in fast memory.
@@ -305,26 +358,26 @@ where
             1.0
         };
 
-        PebbleStats {
-            checkpoints_added: self.checkpoints_added,
-            red_pebble_count: self.red_pebbles.len(),
-            blue_pebble_count: self.blue_pebbles.len(),
+        PebbleStats::new(
+            self.checkpoints_added,
+            self.red_pebbles.len(),
+            self.blue_pebbles.len(),
             warm_count,
-            write_buffer_count: self.cold.buffered_count(),
-            io_operations: self.io_operations,
-            hot_utilization: if self.hot_capacity > 0 {
+            self.cold.buffered_count(),
+            self.io_operations,
+            if self.hot_capacity > 0 {
                 self.red_pebbles.len() as f64 / self.hot_capacity as f64
             } else {
                 0.0
             },
             theoretical_min_io,
-            io_optimality_ratio: if theoretical_min_io > 0 {
+            if theoretical_min_io > 0 {
                 self.io_operations as f64 / theoretical_min_io as f64
             } else {
                 1.0
             },
             space_complexity_ratio,
-        }
+        )
     }
 
     /// Check if current state meets theoretical bounds.
@@ -336,15 +389,15 @@ where
         let space_bound_satisfied = self.hot_capacity <= expected_space * SPACE_BOUND_MULTIPLIER;
 
         let io_bound_satisfied = match &self.strategy {
-            Strategy::Tree(_) => stats.io_optimality_ratio <= TREE_IO_BOUND,
-            Strategy::DAG(_) => stats.io_optimality_ratio <= DAG_IO_BOUND,
+            Strategy::Tree(_) => stats.io_optimality_ratio() <= TREE_IO_BOUND,
+            Strategy::DAG(_) => stats.io_optimality_ratio() <= DAG_IO_BOUND,
         };
 
         TheoreticalValidation::new(
             space_bound_satisfied,
             io_bound_satisfied,
-            stats.space_complexity_ratio,
-            stats.io_optimality_ratio,
+            stats.space_complexity_ratio(),
+            stats.io_optimality_ratio(),
             expected_space,
             total_nodes,
         )
@@ -359,6 +412,8 @@ where
             let (id, ref checkpoint) = pending[i];
             if let Err(e) = self.cold.store(id, checkpoint) {
                 // Re-insert the remaining (unstored) items back into warm.
+                // Safe: warm was fully drained above, so re-inserting the
+                // remaining items cannot exceed its capacity.
                 for (remaining_id, remaining) in pending.drain(i..) {
                     self.warm.insert(remaining_id, remaining);
                 }
@@ -427,7 +482,7 @@ where
 
     /// Remove a checkpoint. Returns `true` if found and removed.
     pub fn remove(&mut self, state_id: T::Id) -> bool {
-        // Track whether the item was in a game-tracked tier (hot or cold).
+        // Remove from whichever tier holds it (hot, warm, or cold).
         let was_in_hot = self.red_pebbles.remove(&state_id).is_some();
         let was_in_warm = !was_in_hot && self.warm.remove(state_id).is_some();
         let was_in_cold = !was_in_hot && !was_in_warm && self.blue_pebbles.remove(&state_id);
@@ -454,7 +509,7 @@ where
     // --- Internal ---
 
     /// Assign a checkpoint to the active branch and update branch head.
-    fn track_new_checkpoint(&mut self, state_id: T::Id) {
+    pub(super) fn track_new_checkpoint(&mut self, state_id: T::Id) {
         if let Some(ref mut tracker) = self.branches {
             let active = tracker.active();
             tracker.assign(state_id, active);
@@ -466,7 +521,7 @@ where
 
     /// Mirror a red pebble placement in the debug game and validate.
     #[cfg(debug_assertions)]
-    fn debug_place_red(&mut self, state_id: T::Id) {
+    pub(super) fn debug_place_red(&mut self, state_id: T::Id) {
         self.game.place_red(state_id);
         self.debug_validate();
     }
@@ -516,10 +571,24 @@ where
             self.game.place_blue(overflow_id);
 
             if let Err(e) = self.cold.store(overflow_id, &overflow) {
-                // Cold store failed — put the overflow back into warm so it
-                // is not lost. Remove the item we just inserted to make room.
-                self.warm.remove(state_id);
+                // Cold store failed — undo everything so no data is lost.
+                // Remove state_id from warm and put overflow back in its place.
+                let recovered = self.warm.remove(state_id);
                 self.warm.insert(overflow_id, overflow);
+
+                // Put state_id back into hot (where the caller took it from).
+                if let Some(cp) = recovered {
+                    self.red_pebbles.insert(state_id, cp);
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    self.game.remove_node(overflow_id); // undo place_blue
+                    if self.red_pebbles.contains_key(&state_id) {
+                        self.game.place_red(state_id); // restored to hot
+                    }
+                }
+
                 return Err(PebbleManagerError::Serialization {
                     state_id: overflow_id,
                     source: e,

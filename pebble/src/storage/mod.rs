@@ -6,7 +6,6 @@ pub use memory::{InMemoryStorage, crc32};
 
 use alloc::vec::Vec;
 use core::hash::Hash;
-use core::mem::MaybeUninit;
 /// Session/correlation ID trait.
 ///
 /// Built-in implementations: `u128`, `u64`, `()` (no tracking).
@@ -60,25 +59,25 @@ pub trait CheckpointLoader<CId: Copy + Eq + Hash + core::fmt::Debug = u64> {
 /// - `SId` - Session ID type
 /// - `MAX_DEPS` - Maximum dependencies
 pub struct CheckpointMetadata<
-    CId: Copy + Eq + Hash + core::fmt::Debug = u64,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,
     const MAX_DEPS: usize = 8,
 > {
     pub state_id: CId,
-    dependencies: [MaybeUninit<CId>; MAX_DEPS],
+    dependencies: [CId; MAX_DEPS],
     pub dep_count: u8,
     pub creation_timestamp: u64,
     pub session_id: SId,
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     CheckpointMetadata<CId, SId, MAX_DEPS>
 {
     /// Create metadata with no dependencies.
     pub fn new(state_id: CId, creation_timestamp: u64, session_id: SId) -> Self {
         Self {
             state_id,
-            dependencies: [const { MaybeUninit::uninit() }; MAX_DEPS],
+            dependencies: [CId::default(); MAX_DEPS],
             dep_count: 0,
             creation_timestamp,
             session_id,
@@ -101,10 +100,10 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
             });
         }
 
-        let mut dependencies = [const { MaybeUninit::uninit() }; MAX_DEPS];
+        let mut dependencies = [CId::default(); MAX_DEPS];
 
         for (i, &dep) in deps.iter().enumerate() {
-            dependencies[i].write(dep);
+            dependencies[i] = dep;
         }
 
         Ok(Self {
@@ -118,13 +117,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
 
     /// Get dependencies as a slice.
     pub fn dependencies(&self) -> &[CId] {
-        // SAFETY: dep_count entries are initialized by construction
-        unsafe {
-            core::slice::from_raw_parts(
-                self.dependencies.as_ptr() as *const CId,
-                self.dep_count as usize,
-            )
-        }
+        &self.dependencies[..self.dep_count as usize]
     }
 
     /// Maximum dependencies this metadata can hold.
@@ -138,23 +131,13 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> Clone
-    for CheckpointMetadata<CId, SId, MAX_DEPS>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    Clone for CheckpointMetadata<CId, SId, MAX_DEPS>
 {
     fn clone(&self) -> Self {
-        let mut dependencies = [const { MaybeUninit::uninit() }; MAX_DEPS];
-
-        for (i, src) in self.dependencies[..self.dep_count as usize]
-            .iter()
-            .enumerate()
-        {
-            // SAFETY: dep_count entries are initialized by construction
-            dependencies[i].write(unsafe { src.assume_init() });
-        }
-
         Self {
             state_id: self.state_id,
-            dependencies,
+            dependencies: self.dependencies,
             dep_count: self.dep_count,
             creation_timestamp: self.creation_timestamp,
             session_id: self.session_id,
@@ -162,7 +145,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     core::fmt::Debug for CheckpointMetadata<CId, SId, MAX_DEPS>
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -176,8 +159,8 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> PartialEq
-    for CheckpointMetadata<CId, SId, MAX_DEPS>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    PartialEq for CheckpointMetadata<CId, SId, MAX_DEPS>
 {
     fn eq(&self, other: &Self) -> bool {
         self.state_id == other.state_id
@@ -188,7 +171,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> Eq
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> Eq
     for CheckpointMetadata<CId, SId, MAX_DEPS>
 {
 }
@@ -231,7 +214,7 @@ pub enum IntegrityErrorKind {
 
 /// Storage with recovery support.
 pub trait RecoverableStorage<
-    CId: Copy + Eq + Hash + core::fmt::Debug = u64,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,
     const MAX_DEPS: usize = 8,
 >: CheckpointLoader<CId>

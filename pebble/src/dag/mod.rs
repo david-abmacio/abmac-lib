@@ -44,6 +44,38 @@ pub struct DAGNode<T> {
     pub(crate) rebuild_depth: u32,
 }
 
+impl<T> DAGNode<T> {
+    #[inline]
+    pub fn dependencies(&self) -> &[T] {
+        &self.dependencies
+    }
+
+    #[inline]
+    pub fn dependents(&self) -> &[T] {
+        &self.dependents
+    }
+
+    #[inline]
+    pub fn computation_cost(&self) -> usize {
+        self.computation_cost
+    }
+
+    #[inline]
+    pub fn access_frequency(&self) -> u64 {
+        self.access_frequency
+    }
+
+    #[inline]
+    pub fn creation_time(&self) -> u64 {
+        self.creation_time
+    }
+
+    #[inline]
+    pub fn rebuild_depth(&self) -> u32 {
+        self.rebuild_depth
+    }
+}
+
 /// DAG structure statistics.
 #[derive(Debug, Clone)]
 #[must_use]
@@ -187,16 +219,8 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
             .filter(|d| seen.insert(*d))
             .collect();
 
-        let node = DAGNode {
-            dependencies: deduped.clone(),
-            dependents: Vec::new(),
-            computation_cost: deduped.len(),
-            access_frequency: 1,
-            creation_time: self.time_counter,
-            rebuild_depth,
-        };
-
-        self.time_counter = self.time_counter.saturating_add(1);
+        let computation_cost = deduped.len();
+        let is_root = deduped.is_empty();
 
         // Add reverse dependencies (use deduped to avoid duplicate entries)
         for &dep in &deduped {
@@ -206,7 +230,7 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
         }
 
         // Update roots: new node is a root if it has no dependencies
-        if deduped.is_empty() {
+        if is_root {
             self.roots.insert(id);
         }
 
@@ -216,6 +240,17 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
         }
         // New node is always a leaf until something depends on it
         self.leaves.insert(id);
+
+        let node = DAGNode {
+            dependencies: deduped, // move, no clone
+            dependents: Vec::new(),
+            computation_cost,
+            access_frequency: 1,
+            creation_time: self.time_counter,
+            rebuild_depth,
+        };
+
+        self.time_counter = self.time_counter.saturating_add(1);
 
         self.nodes.insert(id, node);
 
@@ -295,9 +330,9 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
         }
 
         // Sort by access frequency (LRU) and creation time
-        candidates.sort_by_key(|id| {
-            let node = &self.nodes[id];
-            (node.access_frequency, node.creation_time)
+        candidates.sort_by_key(|id| match self.nodes.get(id) {
+            Some(node) => (node.access_frequency, node.creation_time),
+            None => (u64::MAX, u64::MAX),
         });
 
         candidates

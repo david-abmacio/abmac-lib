@@ -53,7 +53,7 @@ verdict::display_error! {
 /// This is a pure metadata structure — it does not own checkpoints
 /// or interact with storage. `PebbleManager` owns the tracker and
 /// calls into it during `add()`, `remove()`, and `fork()`.
-pub struct BranchTracker<T: Copy + Eq + core::hash::Hash> {
+pub(super) struct BranchTracker<T: Copy + Eq + core::hash::Hash> {
     branches: HashMap<BranchId, BranchInfo<T>>,
     checkpoint_to_branch: HashMap<T, BranchId>,
     active: BranchId,
@@ -62,7 +62,7 @@ pub struct BranchTracker<T: Copy + Eq + core::hash::Hash> {
 
 impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
     /// Create a new tracker with a HEAD branch.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         let mut branches = HashMap::new();
         branches.insert(
             HEAD,
@@ -83,7 +83,7 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
     }
 
     /// Create a new branch forking from a checkpoint on an existing branch.
-    pub fn create_branch(
+    pub(super) fn create_branch(
         &mut self,
         name: &str,
         fork_point: T,
@@ -98,7 +98,7 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
             });
         }
         let id = BranchId(self.next_id);
-        self.next_id += 1;
+        self.next_id = self.next_id.wrapping_add(1);
         self.branches.insert(
             id,
             BranchInfo {
@@ -113,37 +113,40 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
     }
 
     /// Assign a checkpoint to a branch.
-    pub fn assign(&mut self, checkpoint_id: T, branch_id: BranchId) {
+    pub(super) fn assign(&mut self, checkpoint_id: T, branch_id: BranchId) {
         self.checkpoint_to_branch.insert(checkpoint_id, branch_id);
     }
 
     /// Which branch does this checkpoint belong to?
-    pub fn branch_of(&self, checkpoint_id: T) -> Option<BranchId> {
+    #[inline]
+    pub(super) fn branch_of(&self, checkpoint_id: T) -> Option<BranchId> {
         self.checkpoint_to_branch.get(&checkpoint_id).copied()
     }
 
     /// Remove a checkpoint from branch tracking.
-    pub fn remove_checkpoint(&mut self, checkpoint_id: T) {
+    pub(super) fn remove_checkpoint(&mut self, checkpoint_id: T) {
         self.checkpoint_to_branch.remove(&checkpoint_id);
     }
 
     /// Get info for a branch.
-    pub fn info(&self, branch_id: BranchId) -> Option<&BranchInfo<T>> {
+    #[inline]
+    pub(super) fn info(&self, branch_id: BranchId) -> Option<&BranchInfo<T>> {
         self.branches.get(&branch_id)
     }
 
     /// Get mutable info for a branch.
-    pub fn info_mut(&mut self, branch_id: BranchId) -> Option<&mut BranchInfo<T>> {
+    #[inline]
+    pub(super) fn info_mut(&mut self, branch_id: BranchId) -> Option<&mut BranchInfo<T>> {
         self.branches.get_mut(&branch_id)
     }
 
     /// Iterate all branches.
-    pub fn all_branches(&self) -> impl Iterator<Item = &BranchInfo<T>> {
+    pub(super) fn all_branches(&self) -> impl Iterator<Item = &BranchInfo<T>> {
         self.branches.values()
     }
 
     /// Find all branches that fork at a given checkpoint.
-    pub fn branches_forked_at(&self, checkpoint_id: T) -> Vec<BranchId> {
+    pub(super) fn branches_forked_at(&self, checkpoint_id: T) -> Vec<BranchId> {
         self.branches
             .values()
             .filter(|b| b.fork_point == Some(checkpoint_id))
@@ -153,7 +156,7 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
 
     /// Walk the parent chain from a branch back to HEAD.
     /// Returns the chain including the starting branch.
-    pub fn lineage(&self, branch_id: BranchId) -> Option<Vec<BranchId>> {
+    pub(super) fn lineage(&self, branch_id: BranchId) -> Option<Vec<BranchId>> {
         let mut chain = Vec::new();
         let mut current = self.branches.get(&branch_id);
         while let Some(info) = current {
@@ -164,12 +167,16 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
     }
 
     /// The currently active branch.
-    pub fn active(&self) -> BranchId {
+    #[inline]
+    pub(super) fn active(&self) -> BranchId {
         self.active
     }
 
     /// Set the active branch.
-    pub fn set_active(&mut self, branch_id: BranchId) -> core::result::Result<(), BranchError> {
+    pub(super) fn set_active(
+        &mut self,
+        branch_id: BranchId,
+    ) -> core::result::Result<(), BranchError> {
         if !self.branches.contains_key(&branch_id) {
             return Err(BranchError::BranchNotFound { id: branch_id });
         }

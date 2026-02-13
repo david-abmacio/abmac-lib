@@ -195,8 +195,8 @@ fn main() {
     let s = mgr.stats();
     println!(
         "\n  {BOLD}Done.{RESET} {DIM}Checkpoints: {}  I/O: {}  Branches: {}{RESET}\n",
-        s.checkpoints_added,
-        s.io_operations,
+        s.checkpoints_added(),
+        s.io_operations(),
         mgr.branches().map(|b| b.len()).unwrap_or(0),
     );
 }
@@ -339,7 +339,7 @@ fn render(
         &mut buf,
         &hot,
         &cold,
-        stats.red_pebble_count,
+        stats.red_pebble_count(),
         HOT_CAPACITY,
         |id, color| branching_tier_entry(mgr, id, color, values),
     );
@@ -366,8 +366,8 @@ fn render(
     row!(
         buf,
         "  {DIM}I/O: {}    Checkpoints: {}    Branches: {}{RESET}",
-        stats.io_operations,
-        stats.checkpoints_added,
+        stats.io_operations(),
+        stats.checkpoints_added(),
         mgr.branches().map(|b| b.len()).unwrap_or(0),
     );
     row!(buf);

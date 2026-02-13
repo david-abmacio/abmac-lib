@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 /// A type that can be checkpointed and rebuilt from dependencies.
 pub trait Checkpointable: Sized + Clone {
     /// Unique identifier type (e.g., `u64`, `u128`, UUID).
-    type Id: Copy + Eq + Hash + core::fmt::Debug;
+    type Id: Copy + Eq + Hash + Default + core::fmt::Debug;
 
     /// Error type for rebuild failures.
     type RebuildError: core::fmt::Debug;

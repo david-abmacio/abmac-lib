@@ -10,7 +10,7 @@ use super::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId,
 /// In-memory storage for testing. Not thread-safe.
 #[derive(Debug)]
 pub struct InMemoryStorage<
-    CId: Copy + Eq + Hash + core::fmt::Debug = u64,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,
     const MAX_DEPS: usize = 8,
 > {
@@ -19,8 +19,8 @@ pub struct InMemoryStorage<
     next_timestamp: u64,
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> Default
-    for InMemoryStorage<CId, SId, MAX_DEPS>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    Default for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     fn default() -> Self {
         Self {
@@ -31,7 +31,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     InMemoryStorage<CId, SId, MAX_DEPS>
 {
     pub fn new() -> Self {
@@ -64,7 +64,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     Spout<(CId, Vec<u8>)> for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     fn send(&mut self, item: (CId, Vec<u8>)) {
@@ -76,7 +76,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     CheckpointLoader<CId> for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     fn load(&self, state_id: CId) -> Result<Vec<u8>, StorageError> {
@@ -91,7 +91,7 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
     }
 }
 
-impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
     RecoverableStorage<CId, SId, MAX_DEPS> for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     type MetadataIter<'a>
@@ -114,15 +114,15 @@ impl<CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: u
 /// Iterator over checkpoint metadata.
 pub struct InMemoryMetadataIter<
     'a,
-    CId: Copy + Eq + Hash + core::fmt::Debug = u64,
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,
     const MAX_DEPS: usize = 8,
 > {
     inner: hashbrown::hash_map::Iter<'a, CId, CheckpointMetadata<CId, SId, MAX_DEPS>>,
 }
 
-impl<'a, CId: Copy + Eq + Hash + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize> Iterator
-    for InMemoryMetadataIter<'a, CId, SId, MAX_DEPS>
+impl<'a, CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    Iterator for InMemoryMetadataIter<'a, CId, SId, MAX_DEPS>
 {
     type Item = (CId, CheckpointMetadata<CId, SId, MAX_DEPS>);
 

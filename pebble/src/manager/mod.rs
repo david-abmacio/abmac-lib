@@ -11,6 +11,7 @@ mod error;
 mod pebble_manager;
 mod rebuild;
 mod recovery;
+mod safety;
 mod serializers;
 mod stats;
 mod traits;
@@ -25,6 +26,7 @@ pub use cold::RingCold;
 pub use cold::{ColdTier, DirectStorage, DirectStorageError, RecoverableColdTier};
 pub use error::{BuilderError, ErasedPebbleManagerError, PebbleManagerError, Result};
 pub use pebble_manager::PebbleManager;
+pub use safety::{CapacityGuard, CheckpointRef};
 #[cfg(feature = "bytecast")]
 pub use serializers::BytecastSerializer;
 pub use stats::{PebbleStats, TheoreticalValidation};

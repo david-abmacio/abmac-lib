@@ -21,7 +21,7 @@ enum DfsColor {
 }
 
 impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
-    /// Validate the DAG is acyclic.
+    /// Validate the DAG is acyclic: O(V+E) three-color DFS.
     pub fn validate_acyclic(&self) -> Result<(), DAGError> {
         let mut colors: HashMap<T, DfsColor> = HashMap::new();
 

@@ -53,11 +53,13 @@ impl Strategy {
         }
     }
 
+    #[must_use]
     pub fn get_eviction_count(&self, red_count: usize, total_count: usize) -> usize {
         let optimal_red_count = total_count.isqrt();
         red_count.saturating_sub(optimal_red_count)
     }
 
+    #[must_use]
     pub fn recommended_hot_capacity(&self, dag_stats: &DAGStats) -> usize {
         match self {
             Strategy::Tree(strategy) => strategy.recommended_hot_capacity(dag_stats),
@@ -130,6 +132,7 @@ impl TreeStrategy {
         candidates
     }
 
+    #[must_use]
     pub fn recommended_hot_capacity(&self, dag_stats: &DAGStats) -> usize {
         let sqrt_leaves = dag_stats.leaf_nodes.isqrt();
         (sqrt_leaves * TREE_CAPACITY_MULTIPLIER).max(TREE_MIN_HOT_CAPACITY)
@@ -223,6 +226,7 @@ impl DAGStrategy {
         candidates
     }
 
+    #[must_use]
     pub fn recommended_hot_capacity(&self, dag_stats: &DAGStats) -> usize {
         let optimal_size = dag_stats.total_nodes.isqrt();
         optimal_size.max(DAG_MIN_HOT_CAPACITY)

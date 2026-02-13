@@ -6,6 +6,7 @@ use hashbrown::{HashMap, HashSet};
 use super::cold::ColdTier;
 use super::error::{PebbleManagerError, Result};
 use super::pebble_manager::PebbleManager;
+use super::safety::CheckpointRef;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
 
@@ -190,11 +191,19 @@ where
             }
         }
         // Promote cold deps back to hot so they're available as refs.
+        // This may temporarily push red_pebbles.len() above hot_capacity.
+        // The overshoot is bounded by the dependency width of a single node,
+        // which rebuild() validated against hot_capacity before entering the
+        // rebuild loop. Evicting here would risk removing deps needed by
+        // this or subsequent rebuild steps.
         for dep_id in cold_loads {
             let checkpoint = self.load_from_cold(dep_id)?;
             self.io_operations = self.io_operations.saturating_add(1);
             self.red_pebbles.insert(dep_id, checkpoint);
             self.blue_pebbles.remove(&dep_id);
+
+            #[cfg(debug_assertions)]
+            self.game.move_to_red(dep_id);
         }
 
         let mut refs = HashMap::new();
@@ -207,6 +216,12 @@ where
             refs.insert(dep_id, dep);
         }
         Ok(refs)
+    }
+
+    /// Like [`rebuild`](Self::rebuild), but takes a [`CheckpointRef`] instead of a raw ID.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn rebuild_ref(&mut self, token: CheckpointRef<T::Id>) -> Result<T, T::Id, C::Error> {
+        self.rebuild(token.id())
     }
 
     pub(super) fn promote_from_workspace(&mut self, mut workspace: HashMap<T::Id, T>) {

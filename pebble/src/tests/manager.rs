@@ -272,10 +272,10 @@ fn test_stats() {
     }
 
     let stats = manager.stats();
-    assert_eq!(stats.checkpoints_added, 5);
-    assert_eq!(stats.red_pebble_count, 5);
-    assert_eq!(stats.blue_pebble_count, 0);
-    assert_eq!(stats.io_operations, 0, "no evictions means no I/O");
+    assert_eq!(stats.checkpoints_added(), 5);
+    assert_eq!(stats.red_pebble_count(), 5);
+    assert_eq!(stats.blue_pebble_count(), 0);
+    assert_eq!(stats.io_operations(), 0, "no evictions means no I/O");
 }
 
 // Rebuild tests
@@ -360,6 +360,14 @@ fn test_theoretical_validation_space_bound() {
     );
     assert_eq!(validation.expected_max_space(), 10);
     assert_eq!(validation.total_nodes(), 100);
+
+    // Space complexity ratio: hot_capacity=10, sqrt(100)=10 → ratio=1.0
+    let stats = manager.stats();
+    assert!(
+        (stats.space_complexity_ratio() - 1.0).abs() < 0.01,
+        "Space ratio should be ~1.0, got {}",
+        stats.space_complexity_ratio()
+    );
 }
 
 #[test]
@@ -388,10 +396,14 @@ fn test_theoretical_validation_space_bound_exceeded() {
 
 #[test]
 fn test_theoretical_validation_io_bound() {
-    // With low I/O operations, should satisfy I/O bound
+    // Verify that real I/O is tracked and the io_optimality_ratio reflects it.
+    // With hot=10 and 20 nodes, eviction writes bump the I/O counter.
+    // The DAG bound (3.0x) is an asymptotic guarantee — small workloads
+    // may exceed it — so we test that the ratio is computed correctly
+    // rather than that it satisfies the bound at toy scale.
     let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
 
-    for i in 0..5 {
+    for i in 0..20 {
         let cp = TestCheckpoint {
             id: i,
             data: alloc::format!("data{i}"),
@@ -400,33 +412,30 @@ fn test_theoretical_validation_io_bound() {
         manager.add(cp).unwrap();
     }
 
-    let validation = manager.validate_theoretical_bounds();
-    // With no evictions, I/O should be 0, which is well under the bound
-    assert!(
-        validation.io_bound_satisfied(),
-        "I/O bound should be satisfied with minimal operations"
-    );
-}
+    manager.flush().unwrap();
 
-#[test]
-fn test_stats_space_complexity_ratio() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
-
-    for i in 0..100 {
-        let cp = TestCheckpoint {
-            id: i,
-            data: alloc::format!("data{i}"),
-            deps: vec![],
-        };
-        manager.add(cp).unwrap();
-    }
+    // Load one item from cold — this is a real read I/O
+    let cold_id = (0..20)
+        .find(|&i| manager.is_in_storage(i))
+        .expect("at least one checkpoint should be in storage");
+    manager.load(cold_id).unwrap();
 
     let stats = manager.stats();
-    // hot_capacity=10, sqrt(100)=10, ratio should be 1.0
+    assert!(stats.io_operations() > 0, "should have performed real I/O");
+    assert!(stats.theoretical_min_io() > 0, "min I/O should be nonzero");
     assert!(
-        (stats.space_complexity_ratio - 1.0).abs() < 0.01,
-        "Space ratio should be ~1.0, got {}",
-        stats.space_complexity_ratio
+        stats.io_optimality_ratio() > 1.0,
+        "ratio should exceed 1.0 with eviction overhead (got {})",
+        stats.io_optimality_ratio(),
+    );
+
+    // Validation should report the bound check consistently
+    let validation = manager.validate_theoretical_bounds();
+    let expected = stats.io_optimality_ratio() <= 3.0;
+    assert_eq!(
+        validation.io_bound_satisfied(),
+        expected,
+        "io_bound_satisfied should match manual ratio check",
     );
 }
 
@@ -604,13 +613,13 @@ mod cold_buffer {
         let id = warm_id.expect("should have item in warm cache");
 
         // Load promotes from warm -> hot (no I/O)
-        let io_before = manager.stats().io_operations;
+        let io_before = manager.stats().io_operations();
         let cp = manager.load(id).unwrap();
         assert_eq!(cp.id, id);
         assert!(manager.is_hot(id));
         assert!(!manager.is_in_warm(id));
         // No I/O since it came from warm tier
-        assert_eq!(manager.stats().io_operations, io_before);
+        assert_eq!(manager.stats().io_operations(), io_before);
     }
 
     #[test]
@@ -627,12 +636,12 @@ mod cold_buffer {
                 .unwrap();
         }
 
-        let warm = manager.stats().warm_count;
+        let warm = manager.stats().warm_count();
         assert!(warm > 0);
 
         manager.flush().unwrap();
 
-        assert_eq!(manager.stats().warm_count, 0);
+        assert_eq!(manager.stats().warm_count(), 0);
         assert!(manager.blue_count() > 0);
     }
 
@@ -680,9 +689,9 @@ mod cold_buffer {
         }
 
         let stats = manager.stats();
-        assert!(stats.warm_count > 0);
+        assert!(stats.warm_count() > 0);
         assert_eq!(
-            stats.red_pebble_count + stats.blue_pebble_count + stats.warm_count,
+            stats.red_pebble_count() + stats.blue_pebble_count() + stats.warm_count(),
             4
         );
     }
@@ -753,11 +762,11 @@ mod cold_buffer {
 
         // 70 adds, hot=2: 2 hot, 64 warm (full), 4 overflow -> write buffer
         let stats = manager.stats();
-        assert_eq!(stats.red_pebble_count, 2);
-        assert_eq!(stats.warm_count, 64);
+        assert_eq!(stats.red_pebble_count(), 2);
+        assert_eq!(stats.warm_count(), 64);
         // The 4 overflowed items are serialized into the write buffer
-        assert_eq!(stats.write_buffer_count, 4, "4 items should be buffered");
-        assert_eq!(stats.blue_pebble_count, 4, "4 items serialized so far");
+        assert_eq!(stats.write_buffer_count(), 4, "4 items should be buffered");
+        assert_eq!(stats.blue_pebble_count(), 4, "4 items serialized so far");
 
         // Storage should not yet have received all items (write buffer batches)
         let storage_count_before_flush = manager.cold().storage().iter_metadata().count();
@@ -766,8 +775,8 @@ mod cold_buffer {
         manager.flush().unwrap();
 
         let stats_after = manager.stats();
-        assert_eq!(stats_after.warm_count, 0, "warm drained");
-        assert_eq!(stats_after.write_buffer_count, 0, "write buffer drained");
+        assert_eq!(stats_after.warm_count(), 0, "warm drained");
+        assert_eq!(stats_after.write_buffer_count(), 0, "write buffer drained");
 
         // Storage now has everything that was serialized
         let storage_count_after_flush = manager.cold().storage().iter_metadata().count();
@@ -794,15 +803,15 @@ mod cold_buffer {
 
         // Before flush: some items in warm, some possibly in write buffer
         let before = manager.stats();
-        assert!(before.warm_count > 0 || before.write_buffer_count > 0);
+        assert!(before.warm_count() > 0 || before.write_buffer_count() > 0);
 
         manager.flush().unwrap();
 
         let after = manager.stats();
-        assert_eq!(after.warm_count, 0);
-        assert_eq!(after.write_buffer_count, 0);
+        assert_eq!(after.warm_count(), 0);
+        assert_eq!(after.write_buffer_count(), 0);
         // All serialized items reached storage
-        assert!(after.blue_pebble_count > 0);
+        assert!(after.blue_pebble_count() > 0);
     }
 
     #[test]
@@ -876,8 +885,8 @@ fn hint_total_checkpoints_computes_sqrt() {
             .unwrap();
     }
     // 100 items, hot_capacity=100: all in hot, none evicted
-    assert_eq!(manager.stats().red_pebble_count, 100);
-    assert_eq!(manager.stats().blue_pebble_count, 0);
+    assert_eq!(manager.stats().red_pebble_count(), 100);
+    assert_eq!(manager.stats().blue_pebble_count(), 0);
 
     // 101st triggers eviction
     manager
@@ -887,7 +896,7 @@ fn hint_total_checkpoints_computes_sqrt() {
             deps: vec![],
         })
         .unwrap();
-    assert!(manager.stats().blue_pebble_count > 0 || manager.stats().red_pebble_count <= 100);
+    assert!(manager.stats().blue_pebble_count() > 0 || manager.stats().red_pebble_count() <= 100);
 }
 
 #[cfg(feature = "cold-buffer")]
@@ -901,13 +910,13 @@ fn builder_warm_capacity_configurable() {
     );
     let mut manager = PebbleManagerBuilder::new()
         .cold(cold)
-        .warm(WarmCache::<TestCheckpoint>::with_capacity(4))
-        .hot_capacity(2)
+        .warm(WarmCache::<TestCheckpoint>::with_capacity(2))
+        .hot_capacity(4)
         .build::<TestCheckpoint>()
         .unwrap();
 
-    // hot=2, warm_capacity=4
-    // Adds 0..6: 2 hot, 4 warm (full)
+    // hot=4, warm_capacity=2
+    // Adds 0..6: 4 hot, 2 warm (full)
     for i in 0..6 {
         manager
             .add(TestCheckpoint {
@@ -919,8 +928,8 @@ fn builder_warm_capacity_configurable() {
     }
 
     let stats = manager.stats();
-    assert_eq!(stats.red_pebble_count, 2);
-    assert_eq!(stats.warm_count, 4);
+    assert_eq!(stats.red_pebble_count(), 4);
+    assert_eq!(stats.warm_count(), 2);
 
     // 7th add overflows warm -> write buffer
     manager
@@ -932,6 +941,6 @@ fn builder_warm_capacity_configurable() {
         .unwrap();
 
     let stats = manager.stats();
-    assert_eq!(stats.warm_count, 4);
-    assert!(stats.write_buffer_count > 0 || stats.blue_pebble_count > 0);
+    assert_eq!(stats.warm_count(), 2);
+    assert!(stats.write_buffer_count() > 0 || stats.blue_pebble_count() > 0);
 }

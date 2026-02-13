@@ -161,7 +161,7 @@ where
 /// Iterator adapter for [`DirectStorage::iter_metadata`].
 pub struct MetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
 where
-    CId: Copy + Eq + Hash + fmt::Debug + 'a,
+    CId: Copy + Eq + Hash + Default + fmt::Debug + 'a,
     S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
     SId: SessionId + 'a,
 {
@@ -170,7 +170,7 @@ where
 
 impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator for MetadataIter<'a, CId, S, SId, MAX_DEPS>
 where
-    CId: Copy + Eq + Hash + fmt::Debug,
+    CId: Copy + Eq + Hash + Default + fmt::Debug,
     S: RecoverableStorage<CId, SId, MAX_DEPS>,
     SId: SessionId,
 {

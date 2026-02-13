@@ -24,7 +24,7 @@ pub use ring::RingCold;
 /// Three implementations:
 /// - [`DirectStorage`] — serialize and send immediately, no buffering (always available)
 /// - [`RingCold`] — serialize into a SpillRing (requires `cold-buffer`)
-/// - [`ParallelCold`] — serialize across a WorkerPool (requires `cold-buffer-std`)
+/// - [`ParallelCold`] — parallel I/O across a WorkerPool (requires `cold-buffer-std`)
 pub trait ColdTier<T: Checkpointable> {
     /// Error type for storage operations.
     type Error: core::fmt::Debug + core::fmt::Display;

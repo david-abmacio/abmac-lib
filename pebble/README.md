@@ -72,7 +72,7 @@ The result is fewer I/O round-trips to storage for the same amount of fast memor
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `cold-buffer` | yes | `RingCold` ring-buffered cold tier |
-| `cold-buffer-std` | | `ParallelCold` multi-threaded serialization (implies `cold-buffer`) |
+| `cold-buffer-std` | | `ParallelCold` multi-threaded I/O (implies `cold-buffer`) |
 | `bytecast` | | Zero-copy `BytecastSerializer` adapter |
 | `verdict` | | `Actionable` error impls for retry integration |
 

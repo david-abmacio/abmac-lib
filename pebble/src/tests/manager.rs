@@ -3,8 +3,11 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use spout::DropSpout;
+
 use crate::manager::{
-    CheckpointSerializer, Checkpointable, DirectStorage, NoWarm, PebbleManager, PebbleManagerError,
+    CheckpointSerializer, Checkpointable, DirectStorage, Manifest, NoWarm, PebbleManager,
+    PebbleManagerError,
 };
 use crate::storage::InMemoryStorage;
 use crate::strategy::Strategy;
@@ -87,7 +90,13 @@ fn test_cold() -> DirectStorage<InMemoryStorage<u64, u128, 8>, TestSerializer> {
 
 #[test]
 fn test_basic_add_and_get() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     let cp = TestCheckpoint {
         id: 1,
@@ -101,7 +110,13 @@ fn test_basic_add_and_get() {
 
 #[test]
 fn test_insert_zero_copy() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     // Use insert with constructor closure
     let id = manager
@@ -118,7 +133,13 @@ fn test_insert_zero_copy() {
 
 #[test]
 fn test_insert_with_dependencies() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     // Add parent checkpoint
     manager
@@ -146,7 +167,13 @@ fn test_insert_with_dependencies() {
 
 #[test]
 fn test_eviction() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 2);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
 
     // Fill up fast memory
     for i in 0..5 {
@@ -168,7 +195,13 @@ fn test_eviction() {
 
 #[test]
 fn test_load_from_storage() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 2);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
 
     // Add checkpoints
     for i in 0..4 {
@@ -199,7 +232,13 @@ fn test_load_from_storage() {
 
 #[test]
 fn test_compress() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 100);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        100,
+    );
 
     // Add many checkpoints
     for i in 0..100 {
@@ -229,7 +268,13 @@ fn test_compress() {
 
 #[test]
 fn test_stats() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     for i in 0..5 {
         let cp = TestCheckpoint {
@@ -250,7 +295,13 @@ fn test_stats() {
 
 #[test]
 fn test_rebuild_simple() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 2);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
 
     // Add a chain of checkpoints: 0 -> 1 -> 2 -> 3
     for i in 0..4 {
@@ -279,7 +330,13 @@ fn test_rebuild_simple() {
 
 #[test]
 fn test_rebuild_from_hot() {
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     let cp = TestCheckpoint {
         id: 1,
@@ -295,8 +352,13 @@ fn test_rebuild_from_hot() {
 
 #[test]
 fn test_rebuild_not_found() {
-    let mut manager: PebbleManager<TestCheckpoint, _, _> =
-        PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager: PebbleManager<TestCheckpoint, _, _, _> = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     // Rebuild non-existent checkpoint should fail
     let result = manager.rebuild(999);
@@ -309,7 +371,13 @@ fn test_rebuild_not_found() {
 fn test_theoretical_validation_space_bound() {
     // 100 nodes with hot_capacity=10 (sqrt(100)=10, 2x=20)
     // Should satisfy space bound since 10 <= 20
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     for i in 0..100 {
         let cp = TestCheckpoint {
@@ -341,7 +409,13 @@ fn test_theoretical_validation_space_bound_exceeded() {
     // 16 nodes with hot_capacity=100
     // sqrt(16) = 4, 2x = 8, but we have 100
     // Should NOT satisfy space bound
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 100);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        100,
+    );
 
     for i in 0..16 {
         let cp = TestCheckpoint {
@@ -366,7 +440,13 @@ fn test_theoretical_validation_io_bound() {
     // The DAG bound (3.0x) is an asymptotic guarantee — small workloads
     // may exceed it — so we test that the ratio is computed correctly
     // rather than that it satisfies the bound at toy scale.
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
 
     for i in 0..20 {
         let cp = TestCheckpoint {
@@ -411,9 +491,14 @@ use crate::storage::RecoveryMode;
 fn test_recover_cold_start() {
     // Fresh storage with no checkpoints
     let cold = test_cold();
-    let (manager, result) =
-        PebbleManager::<TestCheckpoint, _, _>::recover(cold, NoWarm, Strategy::default(), 10)
-            .unwrap();
+    let (manager, result) = PebbleManager::<TestCheckpoint, _, _, _>::recover(
+        cold,
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    )
+    .unwrap();
 
     assert_eq!(result.mode, RecoveryMode::ColdStart);
     assert_eq!(result.checkpoints_loaded, 0);
@@ -426,7 +511,13 @@ fn test_recover_cold_start() {
 #[test]
 fn test_recover_warm_restart() {
     // First, populate storage with checkpoints
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 2);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
 
     // Add checkpoints - with small hot_capacity, some will go to storage
     for i in 0..5 {
@@ -453,9 +544,14 @@ fn test_recover_warm_restart() {
 
     // Recover from storage
     let cold = DirectStorage::new(storage, TestSerializer);
-    let (recovered_manager, result) =
-        PebbleManager::<TestCheckpoint, _, _>::recover(cold, NoWarm, Strategy::default(), 10)
-            .unwrap();
+    let (recovered_manager, result) = PebbleManager::<TestCheckpoint, _, _, _>::recover(
+        cold,
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    )
+    .unwrap();
 
     assert_eq!(result.mode, RecoveryMode::WarmRestart);
     assert!(result.checkpoints_loaded > 0);
@@ -468,7 +564,13 @@ fn test_recover_warm_restart() {
 #[test]
 fn test_recover_with_dependencies() {
     // Create storage with dependent checkpoints
-    let mut manager = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 2);
+    let mut manager = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
 
     // Add a chain: 0 -> 1 -> 2
     for i in 0..3 {
@@ -501,9 +603,14 @@ fn test_recover_with_dependencies() {
 
     // Recover - should recover what was in storage
     let cold = DirectStorage::new(storage, TestSerializer);
-    let (recovered_manager, result) =
-        PebbleManager::<TestCheckpoint, _, _>::recover(cold, NoWarm, Strategy::default(), 10)
-            .unwrap();
+    let (recovered_manager, result) = PebbleManager::<TestCheckpoint, _, _, _>::recover(
+        cold,
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    )
+    .unwrap();
 
     assert_eq!(result.mode, RecoveryMode::WarmRestart);
     assert!(result.integrity_errors.is_empty());
@@ -523,13 +630,20 @@ mod cold_buffer {
         TestCheckpoint,
         RingCold<u64, InMemoryStorage<u64, u128, 8>, TestSerializer, 64>,
         WarmCache<TestCheckpoint>,
+        DropSpout,
     >;
 
     /// Helper: create a RingCold + WarmCache manager for cold-buffer tests.
     fn test_spill_manager(hot_capacity: usize) -> BufferedMgr {
         let cold = RingCold::new(InMemoryStorage::<u64, u128, 8>::new(), TestSerializer);
         let warm = WarmCache::new();
-        PebbleManager::new(cold, warm, Strategy::default(), hot_capacity)
+        PebbleManager::new(
+            cold,
+            warm,
+            Manifest::new(DropSpout),
+            Strategy::default(),
+            hot_capacity,
+        )
     }
 
     #[test]
@@ -840,7 +954,7 @@ fn build_rejects_zero_hot_capacity() {
         .cold(test_cold())
         .warm(NoWarm)
         .hot_capacity(0)
-        .build::<TestCheckpoint>();
+        .build::<TestCheckpoint, _>(Manifest::new(DropSpout));
 
     assert!(result.is_err());
     assert_eq!(result.err().unwrap(), crate::BuilderError::ZeroHotCapacity,);
@@ -856,7 +970,7 @@ fn hint_total_checkpoints_computes_sqrt() {
         .cold(test_cold())
         .warm(NoWarm)
         .hint_total_checkpoints(10_000)
-        .build::<TestCheckpoint>()
+        .build::<TestCheckpoint, _>(Manifest::new(DropSpout))
         .unwrap();
 
     for i in 0..100 {
@@ -900,7 +1014,7 @@ fn builder_warm_capacity_configurable() {
         .cold(cold)
         .warm(WarmCache::<TestCheckpoint>::with_capacity(2))
         .hot_capacity(4)
-        .build::<TestCheckpoint>()
+        .build::<TestCheckpoint, _>(Manifest::new(DropSpout))
         .unwrap();
 
     // hot=4, warm_capacity=2

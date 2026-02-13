@@ -1,6 +1,8 @@
 //! Tests for compile-time safety types (CheckpointRef, CapacityGuard).
 
-use crate::manager::{DirectStorage, NoWarm, PebbleManager, PebbleManagerError};
+use spout::DropSpout;
+
+use crate::manager::{DirectStorage, Manifest, NoWarm, PebbleManager, PebbleManagerError};
 use crate::storage::InMemoryStorage;
 use crate::strategy::Strategy;
 
@@ -57,7 +59,13 @@ fn cp(id: u64) -> Cp {
 
 #[test]
 fn test_add_ref_returns_token() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let token = mgr.add_ref(cp(1), &[]).unwrap();
     assert_eq!(token.id(), 1);
     assert!(mgr.is_hot(1));
@@ -65,7 +73,13 @@ fn test_add_ref_returns_token() {
 
 #[test]
 fn test_insert_ref_returns_token() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let token = mgr.insert_ref(&[], || cp(42)).unwrap();
     assert_eq!(token.id(), 42);
     assert!(mgr.is_hot(42));
@@ -73,7 +87,13 @@ fn test_insert_ref_returns_token() {
 
 #[test]
 fn test_locate_found() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     mgr.add(cp(10), &[]).unwrap();
     let token = mgr.locate(10);
     assert!(token.is_some());
@@ -82,13 +102,25 @@ fn test_locate_found() {
 
 #[test]
 fn test_locate_not_found() {
-    let mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     assert!(mgr.locate(999).is_none());
 }
 
 #[test]
 fn test_load_ref() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let token = mgr.add_ref(cp(5), &[]).unwrap();
     let loaded = mgr.load_ref(token).unwrap();
     assert_eq!(loaded.id, 5);
@@ -96,7 +128,13 @@ fn test_load_ref() {
 
 #[test]
 fn test_rebuild_ref() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let token = mgr.add_ref(cp(7), &[]).unwrap();
     let rebuilt = mgr.rebuild_ref(token).unwrap();
     assert_eq!(rebuilt.id, 7);
@@ -104,7 +142,13 @@ fn test_rebuild_ref() {
 
 #[test]
 fn test_stale_token() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let token = mgr.add_ref(cp(3), &[]).unwrap();
     mgr.remove(3);
     let result = mgr.load_ref(token);
@@ -118,7 +162,13 @@ fn test_stale_token() {
 
 #[test]
 fn test_ensure_capacity_when_not_full() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     mgr.add(cp(1), &[]).unwrap();
     // Hot tier has space — no eviction needed
     let guard = mgr.ensure_capacity().unwrap();
@@ -130,7 +180,13 @@ fn test_ensure_capacity_when_not_full() {
 
 #[test]
 fn test_ensure_capacity_evicts_when_full() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 2);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        2,
+    );
     mgr.add(cp(1), &[]).unwrap();
     mgr.add(cp(2), &[]).unwrap();
     assert_eq!(mgr.red_count(), 2);
@@ -145,7 +201,13 @@ fn test_ensure_capacity_evicts_when_full() {
 
 #[test]
 fn test_guard_insert() {
-    let mut mgr = PebbleManager::new(cold(), NoWarm, Strategy::default(), 4);
+    let mut mgr = PebbleManager::new(
+        cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
     let guard = mgr.ensure_capacity().unwrap();
     let token = guard.insert(&[], || cp(77)).unwrap();
     assert_eq!(token.id(), 77);

@@ -2,9 +2,14 @@
 
 extern crate alloc;
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use crate::strategy::Strategy;
 
 use super::cold::ColdTier;
+use super::manifest::{Manifest, ManifestEntry};
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
@@ -25,8 +30,9 @@ const DEFAULT_RING_BUFFER_CAPACITY: usize = 64;
 /// # Example
 ///
 /// ```
-/// use pebble::{PebbleManagerBuilder, InMemoryStorage, DirectStorage, NoWarm};
+/// use pebble::{PebbleManagerBuilder, InMemoryStorage, DirectStorage, Manifest, NoWarm};
 /// # use pebble::{Checkpointable, CheckpointSerializer};
+/// use spout::DropSpout;
 /// # #[derive(Clone)] struct MyCp { id: u64 }
 /// # impl Checkpointable for MyCp {
 /// #     type Id = u64;
@@ -44,11 +50,12 @@ const DEFAULT_RING_BUFFER_CAPACITY: usize = 64;
 /// # }
 ///
 /// let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), MySer);
+/// let manifest = Manifest::new(DropSpout);
 /// let manager = PebbleManagerBuilder::new()
 ///     .cold(cold)
 ///     .warm(NoWarm)
 ///     .hot_capacity(4)
-///     .build::<MyCp>()
+///     .build::<MyCp, _>(manifest)
 ///     .unwrap();
 /// ```
 pub struct PebbleManagerBuilder<C = (), W = ()> {
@@ -148,14 +155,16 @@ impl<C, W> PebbleManagerBuilder<C, W> {
     ///
     /// Returns `Err` if `hot_capacity` is 0.
     ///
-    /// `T` is the checkpoint type.
-    pub fn build<T>(
+    /// `T` is the checkpoint type. `S` is the manifest spout type.
+    pub fn build<T, S>(
         self,
-    ) -> core::result::Result<PebbleManager<T, C, W>, super::error::BuilderError>
+        manifest: Manifest<T::Id, S>,
+    ) -> core::result::Result<PebbleManager<T, C, W, S>, super::error::BuilderError>
     where
         T: Checkpointable,
         C: ColdTier<T>,
         W: WarmTier<T>,
+        S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
     {
         if self.hot_capacity == 0 {
             return Err(super::error::BuilderError::ZeroHotCapacity);
@@ -164,6 +173,7 @@ impl<C, W> PebbleManagerBuilder<C, W> {
         Ok(PebbleManager::new(
             self.cold,
             self.warm,
+            manifest,
             self.strategy,
             self.hot_capacity,
         ))
@@ -237,23 +247,26 @@ impl<S, const N: usize> StorageBuilder<S, N> {
 
 /// A `PebbleManager` wired to `RingCold` + `WarmCache` via `BytecastSerializer`.
 #[cfg(all(feature = "bytecast", feature = "cold-buffer"))]
-pub type BufferedManager<T, S, const N: usize> = PebbleManager<
+pub type BufferedManager<T, S, MS, const N: usize> = PebbleManager<
     T,
     super::cold::RingCold<<T as Checkpointable>::Id, S, super::BytecastSerializer, N>,
     super::warm::WarmCache<T>,
+    MS,
 >;
 
 #[cfg(all(feature = "bytecast", feature = "cold-buffer"))]
 impl<S, const N: usize> StorageBuilder<S, N> {
     /// Build a [`PebbleManager`] with `RingCold` and `WarmCache`.
-    pub fn build<T>(
+    pub fn build<T, MS>(
         self,
-    ) -> core::result::Result<BufferedManager<T, S, N>, super::error::BuilderError>
+        manifest: Manifest<T::Id, MS>,
+    ) -> core::result::Result<BufferedManager<T, S, MS, N>, super::error::BuilderError>
     where
         T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
         T::Id: Copy,
         S: spout::Spout<(T::Id, alloc::vec::Vec<u8>), Error = core::convert::Infallible>
             + crate::storage::CheckpointLoader<T::Id>,
+        MS: Spout<ManifestEntry<T::Id>, Error = Infallible>,
     {
         if self.hot_capacity == 0 {
             return Err(super::error::BuilderError::ZeroHotCapacity);
@@ -272,6 +285,7 @@ impl<S, const N: usize> StorageBuilder<S, N> {
         Ok(PebbleManager::new(
             cold,
             warm,
+            manifest,
             self.strategy,
             self.hot_capacity,
         ))
@@ -281,13 +295,15 @@ impl<S, const N: usize> StorageBuilder<S, N> {
 #[cfg(all(feature = "bytecast", not(feature = "cold-buffer")))]
 impl<S, const N: usize> StorageBuilder<S, N> {
     /// Build a [`PebbleManager`] with `DirectStorage` and `NoWarm`.
-    pub fn build<T>(
+    pub fn build<T, MS>(
         self,
+        manifest: Manifest<T::Id, MS>,
     ) -> core::result::Result<
         PebbleManager<
             T,
             super::cold::DirectStorage<S, super::BytecastSerializer>,
             super::warm::NoWarm,
+            MS,
         >,
         super::error::BuilderError,
     >
@@ -295,6 +311,7 @@ impl<S, const N: usize> StorageBuilder<S, N> {
         T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
         S: spout::Spout<(T::Id, alloc::vec::Vec<u8>), Error = core::convert::Infallible>
             + crate::storage::CheckpointLoader<T::Id>,
+        MS: Spout<ManifestEntry<T::Id>, Error = Infallible>,
     {
         if self.hot_capacity == 0 {
             return Err(super::error::BuilderError::ZeroHotCapacity);
@@ -305,6 +322,7 @@ impl<S, const N: usize> StorageBuilder<S, N> {
         Ok(PebbleManager::new(
             cold,
             super::warm::NoWarm,
+            manifest,
             self.strategy,
             self.hot_capacity,
         ))

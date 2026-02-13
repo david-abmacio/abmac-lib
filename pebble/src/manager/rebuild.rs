@@ -3,18 +3,24 @@
 use alloc::vec::Vec;
 use hashbrown::{HashMap, HashSet};
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
 use super::error::{PebbleManagerError, Result};
+use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::safety::CheckpointRef;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Rebuild a checkpoint from its dependencies.
     ///

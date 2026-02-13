@@ -3,8 +3,11 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use spout::DropSpout;
+
 use crate::manager::{
-    BranchError, CheckpointSerializer, Checkpointable, DirectStorage, HEAD, NoWarm, PebbleManager,
+    BranchError, CheckpointSerializer, Checkpointable, DirectStorage, HEAD, Manifest, NoWarm,
+    PebbleManager,
 };
 use crate::storage::InMemoryStorage;
 use crate::strategy::Strategy;
@@ -68,7 +71,13 @@ fn cp(id: u64) -> TestCheckpoint {
 
 #[test]
 fn branching_disabled_by_default() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.add(cp(1), &[]).unwrap();
     assert!(mgr.active_branch().is_none());
     assert!(mgr.branch_of(1).is_none());
@@ -77,7 +86,13 @@ fn branching_disabled_by_default() {
 
 #[test]
 fn enable_branching_assigns_existing_to_head() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.add(cp(1), &[]).unwrap();
     mgr.add(cp(2), &[]).unwrap();
 
@@ -95,7 +110,13 @@ fn enable_branching_assigns_existing_to_head() {
 
 #[test]
 fn enable_branching_idempotent() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     mgr.enable_branching(); // second call is no-op
@@ -104,7 +125,13 @@ fn enable_branching_idempotent() {
 
 #[test]
 fn add_assigns_to_active_branch() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
 
     mgr.add(cp(1), &[]).unwrap();
@@ -119,7 +146,13 @@ fn add_assigns_to_active_branch() {
 
 #[test]
 fn fork_creates_branch() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     mgr.add(cp(2), &[1]).unwrap();
@@ -136,7 +169,13 @@ fn fork_creates_branch() {
 
 #[test]
 fn fork_switches_active_branch() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
 
@@ -151,7 +190,13 @@ fn fork_switches_active_branch() {
 
 #[test]
 fn switch_branch() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     let branch = mgr.fork(1, "alt").unwrap();
@@ -165,7 +210,13 @@ fn switch_branch() {
 
 #[test]
 fn switch_branch_not_found() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
 
     use crate::manager::BranchId;
@@ -178,14 +229,26 @@ fn switch_branch_not_found() {
 
 #[test]
 fn switch_branch_not_enabled() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     let result = mgr.switch_branch(HEAD);
     assert_eq!(result, Err(BranchError::BranchingNotEnabled));
 }
 
 #[test]
 fn fork_nonexistent_checkpoint() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
 
     let result = mgr.fork(999, "bad");
@@ -194,7 +257,13 @@ fn fork_nonexistent_checkpoint() {
 
 #[test]
 fn branch_lineage() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     let b1 = mgr.fork(1, "b1").unwrap();
@@ -210,7 +279,13 @@ fn branch_lineage() {
 
 #[test]
 fn forks_at() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
 
@@ -228,7 +303,13 @@ fn forks_at() {
 
 #[test]
 fn remove_cleans_branch_tracker() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     assert_eq!(mgr.branch_of(1), Some(HEAD));
@@ -239,7 +320,13 @@ fn remove_cleans_branch_tracker() {
 
 #[test]
 fn branches_lists_all() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
     mgr.fork(1, "alt").unwrap();
@@ -254,7 +341,13 @@ fn branches_lists_all() {
 
 #[test]
 fn duplicate_branch_name_rejected() {
-    let mut mgr = PebbleManager::new(test_cold(), NoWarm, Strategy::default(), 10);
+    let mut mgr = PebbleManager::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        10,
+    );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
 

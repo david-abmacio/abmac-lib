@@ -3,8 +3,13 @@
 //! [`CheckpointRef`] proves a checkpoint existed at creation time.
 //! [`CapacityGuard`] proves the hot tier has a free slot.
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
 use super::error::Result;
+use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
@@ -47,22 +52,24 @@ impl<Id> CheckpointRef<Id> {
 /// Borrows the manager mutably, so no other mutation can happen between
 /// guard creation and use.
 #[must_use = "guard should be consumed by .store() or .insert()"]
-pub struct CapacityGuard<'a, T, C, W>
+pub struct CapacityGuard<'a, T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    manager: &'a mut PebbleManager<T, C, W>,
+    manager: &'a mut PebbleManager<T, C, W, S>,
 }
 
-impl<'a, T, C, W> CapacityGuard<'a, T, C, W>
+impl<'a, T, C, W, S> CapacityGuard<'a, T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    pub(super) fn new(manager: &'a mut PebbleManager<T, C, W>) -> Self {
+    pub(super) fn new(manager: &'a mut PebbleManager<T, C, W, S>) -> Self {
         Self { manager }
     }
 

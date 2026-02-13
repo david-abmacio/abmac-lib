@@ -1,6 +1,7 @@
 //! Shared types and helpers for the animated pebble examples.
 
 use pebble::prelude::*;
+use spout::DropSpout;
 
 // ── ANSI escapes ────────────────────────────────────────────────────────────
 
@@ -97,12 +98,22 @@ impl CheckpointSerializer<Checkpoint> for Ser {
 
 // ── Manager type alias ──────────────────────────────────────────────────────
 
-pub type Mgr =
-    PebbleManager<Checkpoint, DirectStorage<InMemoryStorage<u64, u128, 16>, Ser>, NoWarm>;
+pub type Mgr = PebbleManager<
+    Checkpoint,
+    DirectStorage<InMemoryStorage<u64, u128, 16>, Ser>,
+    NoWarm,
+    DropSpout,
+>;
 
 pub fn new_manager(hot_capacity: usize) -> Mgr {
     let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new(), Ser);
-    Mgr::new(cold, NoWarm, Strategy::default(), hot_capacity)
+    Mgr::new(
+        cold,
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        hot_capacity,
+    )
 }
 
 // ── Step panel ──────────────────────────────────────────────────────────────

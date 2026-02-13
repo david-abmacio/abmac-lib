@@ -3,8 +3,13 @@
 use alloc::vec::Vec;
 use hashbrown::{HashMap, HashSet};
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::RecoverableColdTier;
 use super::error::Result;
+use super::manifest::{Manifest, ManifestEntry};
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
@@ -12,17 +17,18 @@ use crate::dag::ComputationDAG;
 use crate::storage::{IntegrityError, IntegrityErrorKind, RecoveryMode, RecoveryResult};
 use crate::strategy::Strategy;
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
-    T::Id: Ord,
     C: RecoverableColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Recover state from existing storage.
     pub fn recover(
         cold: C,
         warm: W,
+        manifest: Manifest<T::Id, S>,
         strategy: Strategy,
         hot_capacity: usize,
     ) -> Result<(Self, RecoveryResult), T::Id, C::Error> {
@@ -34,6 +40,7 @@ where
             strategy,
             cold,
             warm,
+            manifest,
             checkpoints_added: 0,
             io_operations: 0,
             branches: None,

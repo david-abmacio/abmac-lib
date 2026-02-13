@@ -6,8 +6,13 @@ use hashbrown::{HashMap, HashSet};
 use crate::dag::ComputationDAG;
 use crate::strategy::Strategy;
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
 use super::error::{PebbleManagerError, Result};
+use super::manifest::{Manifest, ManifestEntry};
 use super::safety::{CapacityGuard, CheckpointRef};
 use super::stats::{PebbleStats, TheoreticalValidation};
 use super::traits::Checkpointable;
@@ -31,16 +36,18 @@ pub(super) const DAG_IO_BOUND: f64 = 3.0;
 /// - `T` — Checkpointable type
 /// - `C` — Cold tier (serialization + storage)
 /// - `W` — Warm tier (unserialized eviction buffer)
+/// - `S` — Manifest spout (where WAL entries drain on overflow)
 ///
 /// Not internally synchronized. For concurrent access, wrap in a
 /// `Mutex` or `RwLock`. `PebbleManager` is `Send` when all type
-/// parameters (`T`, `C`, `W`) are `Send`.
+/// parameters (`T`, `C`, `W`, `S`) are `Send`.
 #[must_use]
-pub struct PebbleManager<T, C, W>
+pub struct PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     pub(super) hot_capacity: usize,
     pub(super) red_pebbles: HashMap<T::Id, T>,
@@ -49,6 +56,7 @@ where
     pub(super) strategy: Strategy,
     pub(super) cold: C,
     pub(super) warm: W,
+    pub(super) manifest: Manifest<T::Id, S>,
     pub(super) checkpoints_added: u64,
     pub(super) io_operations: u64,
     pub(super) branches: Option<super::branch::BranchTracker<T::Id>>,
@@ -56,11 +64,12 @@ where
     pub(super) game: crate::game::PebbleGame<T::Id>,
 }
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Create a builder with sensible defaults.
     ///
@@ -70,7 +79,13 @@ where
     }
 
     /// Create a new PebbleManager.
-    pub fn new(cold: C, warm: W, strategy: Strategy, hot_capacity: usize) -> Self {
+    pub fn new(
+        cold: C,
+        warm: W,
+        manifest: Manifest<T::Id, S>,
+        strategy: Strategy,
+        hot_capacity: usize,
+    ) -> Self {
         debug_assert!(hot_capacity >= 1, "hot_capacity must be at least 1");
         let hot_capacity = hot_capacity.max(1);
         Self {
@@ -81,6 +96,7 @@ where
             strategy,
             cold,
             warm,
+            manifest,
             checkpoints_added: 0,
             io_operations: 0,
             branches: None,
@@ -201,7 +217,7 @@ where
     /// exists. The guard borrows the manager mutably, so no other mutation
     /// can invalidate the guarantee before the guard is consumed.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn ensure_capacity(&mut self) -> Result<CapacityGuard<'_, T, C, W>, T::Id, C::Error> {
+    pub fn ensure_capacity(&mut self) -> Result<CapacityGuard<'_, T, C, W, S>, T::Id, C::Error> {
         if self.red_pebbles.len() >= self.hot_capacity {
             self.evict_red_pebbles()?;
         }
@@ -427,6 +443,15 @@ where
         let mut pending: Vec<(T::Id, T)> = self.warm.drain().collect();
         for i in 0..pending.len() {
             let (id, ref checkpoint) = pending[i];
+
+            // Write-ahead: record eviction in manifest BEFORE cold store.
+            let deps = self
+                .dag
+                .get_node(id)
+                .map(|n| n.dependencies())
+                .unwrap_or(&[]);
+            self.manifest.record(id, deps);
+
             if let Err(e) = self.cold.store(id, checkpoint) {
                 // Re-insert the remaining (unstored) items back into warm.
                 // Safe: warm was fully drained above, so re-inserting the
@@ -449,6 +474,8 @@ where
         self.cold
             .flush()
             .map_err(|e| PebbleManagerError::FlushFailed { source: e })?;
+        // Flush manifest entries to spout
+        self.manifest.flush();
         Ok(())
     }
 
@@ -587,6 +614,14 @@ where
             #[cfg(debug_assertions)]
             self.game.place_blue(overflow_id);
 
+            // Write-ahead: record eviction in manifest BEFORE cold store.
+            let deps = self
+                .dag
+                .get_node(overflow_id)
+                .map(|n| n.dependencies())
+                .unwrap_or(&[]);
+            self.manifest.record(overflow_id, deps);
+
             if let Err(e) = self.cold.store(overflow_id, &overflow) {
                 // Cold store failed — undo everything so no data is lost.
                 // Remove state_id from warm and put overflow back in its place.
@@ -640,11 +675,12 @@ where
     }
 }
 
-impl<T, C, W> Drop for PebbleManager<T, C, W>
+impl<T, C, W, S> Drop for PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     fn drop(&mut self) {
         let _ = self.flush();

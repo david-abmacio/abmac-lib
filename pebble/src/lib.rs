@@ -13,7 +13,8 @@
 //! # Quick Start
 //!
 //! ```
-//! use pebble::{PebbleManagerBuilder, InMemoryStorage, Checkpointable, CheckpointSerializer, DirectStorage, NoWarm};
+//! use pebble::{PebbleManagerBuilder, InMemoryStorage, Checkpointable, CheckpointSerializer, DirectStorage, Manifest, NoWarm};
+//! use spout::DropSpout;
 //!
 //! #[derive(Clone)]
 //! struct MyCheckpoint { id: u64, data: Vec<u8> }
@@ -37,11 +38,12 @@
 //! }
 //!
 //! let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), MySerializer);
+//! let manifest = Manifest::new(DropSpout);
 //! let mut manager = PebbleManagerBuilder::new()
 //!     .cold(cold)
 //!     .warm(NoWarm)
 //!     .hot_capacity(16)
-//!     .build::<MyCheckpoint>()
+//!     .build::<MyCheckpoint, _>(manifest)
 //!     .unwrap();
 //!
 //! manager.add(MyCheckpoint { id: 1, data: vec![1, 2, 3] }, &[]).unwrap();
@@ -82,9 +84,9 @@ pub use manager::RingCold;
 pub use manager::{
     BranchError, BranchId, BranchInfo, BuilderError, CapacityGuard, CheckpointRef,
     CheckpointSerializer, Checkpointable, ColdTier, DirectStorage, DirectStorageError,
-    ErasedPebbleManagerError, HEAD, NoWarm, PebbleManager, PebbleManagerBuilder,
-    PebbleManagerError, PebbleStats, RecoverableColdTier, Result, TheoreticalValidation, WarmCache,
-    WarmTier,
+    ErasedPebbleManagerError, HEAD, Manifest, ManifestEntry, NoWarm, PebbleManager,
+    PebbleManagerBuilder, PebbleManagerError, PebbleStats, RecoverableColdTier, Result,
+    TheoreticalValidation, VerificationResult, WarmCache, WarmTier,
 };
 pub use storage::{
     CheckpointLoader, CheckpointMetadata, InMemoryStorage, IntegrityError, IntegrityErrorKind,
@@ -114,8 +116,8 @@ pub mod prelude {
     pub use crate::{
         BranchError, BranchId, BranchInfo, BuilderError, CapacityGuard, CheckpointLoader,
         CheckpointRef, CheckpointSerializer, Checkpointable, ColdTier, DirectStorage,
-        ErasedPebbleManagerError, HEAD, HashMap, InMemoryStorage, NoWarm, PebbleManager,
-        PebbleManagerBuilder, PebbleManagerError, RecoverableColdTier, Result, Spout, Strategy,
-        WarmTier, checkpoint_interval, isqrt,
+        ErasedPebbleManagerError, HEAD, HashMap, InMemoryStorage, Manifest, ManifestEntry, NoWarm,
+        PebbleManager, PebbleManagerBuilder, PebbleManagerError, RecoverableColdTier, Result,
+        Spout, Strategy, WarmTier, checkpoint_interval, isqrt,
     };
 }

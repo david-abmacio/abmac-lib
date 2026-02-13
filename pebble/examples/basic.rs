@@ -3,6 +3,7 @@
 //! Run with: cargo run --example basic
 
 use pebble::prelude::*;
+use spout::DropSpout;
 
 /// A simple checkpoint that stores a counter value.
 #[derive(Clone, Debug)]
@@ -53,7 +54,13 @@ impl CheckpointSerializer<CounterCheckpoint> for CounterSerializer {
 fn main() {
     // Create storage and manager with space for 4 checkpoints in fast memory
     let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), CounterSerializer);
-    let mut manager = PebbleManager::new(cold, NoWarm, Strategy::default(), 4);
+    let mut manager = PebbleManager::new(
+        cold,
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
 
     println!("Adding 10 checkpoints (fast memory holds 4)...\n");
 

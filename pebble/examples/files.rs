@@ -12,7 +12,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bytecast::{DeriveFromBytes, DeriveToBytes};
-use pebble::{CheckpointLoader, Checkpointable, PebbleManagerBuilder};
+use pebble::{CheckpointLoader, Checkpointable, Manifest, PebbleManagerBuilder};
+use spout::DropSpout;
 use spout::Spout;
 
 #[derive(Clone, Debug, DeriveToBytes, DeriveFromBytes)]
@@ -95,7 +96,7 @@ fn main() {
             .storage(FileStorage::new(&dir))
             .hot_capacity(4)
             .warm_capacity(4)
-            .build::<Snapshot>()
+            .build::<Snapshot, _>(Manifest::new(DropSpout))
             .unwrap();
 
         println!("Configuration: hot=4, warm=4\n");

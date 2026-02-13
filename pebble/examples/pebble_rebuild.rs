@@ -94,6 +94,7 @@ type RebuildMgr = PebbleManager<
     RebuildCheckpoint,
     DirectStorage<InMemoryStorage<u64, u128, 16>, RebuildSer>,
     NoWarm,
+    spout::DropSpout,
 >;
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -125,7 +126,13 @@ struct Step {
 
 fn main() {
     let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new(), RebuildSer);
-    let mut mgr = RebuildMgr::new(cold, NoWarm, Strategy::default(), HOT_CAPACITY);
+    let mut mgr = RebuildMgr::new(
+        cold,
+        NoWarm,
+        Manifest::new(spout::DropSpout),
+        Strategy::default(),
+        HOT_CAPACITY,
+    );
     let mut val: u64 = 0;
     let mut step_n: u64 = 0;
     let mut flow: Vec<FlowNode> = Vec::new();

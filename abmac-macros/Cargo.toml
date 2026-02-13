@@ -1,0 +1,16 @@
+[package]
+name = "abmac-macros"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Umbrella re-export of ABMAC derive macros"
+
+[dependencies]
+bytecast-macros = { path = "../bytecast-macros", optional = true }
+
+[dev-dependencies]
+bytecast = { path = "../bytecast", features = ["derive", "alloc"] }
+
+[features]
+default = []
+bytecast = ["dep:bytecast-macros"]

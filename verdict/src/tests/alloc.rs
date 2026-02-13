@@ -932,6 +932,75 @@ fn test_display_error_struct_variant() {
     assert!(debug.contains("Checksum"));
 }
 
+// Generic display_error! Tests
+
+#[test]
+fn test_display_error_generic_single_param() {
+    display_error! {
+        pub enum SingleGeneric<E: core::fmt::Debug + core::fmt::Display> {
+            #[display("inner: {source}")]
+            Inner { source: E },
+            #[display("plain error")]
+            Plain,
+        }
+    }
+
+    let err = SingleGeneric::<alloc::string::String>::Inner {
+        source: alloc::string::String::from("boom"),
+    };
+    assert_eq!(format!("{err}"), "inner: boom");
+    assert_eq!(
+        format!("{}", SingleGeneric::<alloc::string::String>::Plain),
+        "plain error"
+    );
+    let _: &dyn core::error::Error = &err;
+}
+
+#[test]
+fn test_display_error_generic_two_params() {
+    display_error! {
+        pub enum TwoGeneric<Id: core::fmt::Debug, E: core::fmt::Debug + core::fmt::Display> {
+            #[display("not found: {id:?}")]
+            NotFound { id: Id },
+            #[display("failed: {source}")]
+            Failed { source: E },
+            #[display("both: {id:?} => {source}")]
+            Both { id: Id, source: E },
+        }
+    }
+
+    let err = TwoGeneric::<u32, alloc::string::String>::NotFound { id: 42 };
+    assert_eq!(format!("{err}"), "not found: 42");
+
+    let err = TwoGeneric::<u32, alloc::string::String>::Failed {
+        source: alloc::string::String::from("oops"),
+    };
+    assert_eq!(format!("{err}"), "failed: oops");
+
+    let err = TwoGeneric::<u32, alloc::string::String>::Both {
+        id: 7,
+        source: alloc::string::String::from("bad"),
+    };
+    assert_eq!(format!("{err}"), "both: 7 => bad");
+}
+
+#[test]
+fn test_display_error_generic_multi_bound() {
+    display_error! {
+        pub enum MultiBound<E: core::fmt::Debug + core::fmt::Display> {
+            #[display("err: {inner}")]
+            Wrapped { inner: E },
+        }
+    }
+
+    let err = MultiBound::<alloc::string::String>::Wrapped {
+        inner: alloc::string::String::from("test"),
+    };
+    assert_eq!(format!("{err}"), "err: test");
+    // Debug also works because of #[derive(Debug)] + E: Debug
+    let _ = alloc::format!("{err:?}");
+}
+
 // Result Extension on Ok Path Tests
 
 #[test]

@@ -6,22 +6,29 @@ description = "O(√T) checkpoint management using the Williams pebble game algo
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["cold-buffer"]
-bytecast = ["dep:bytecast"]
-cold-buffer = []
-cold-buffer-std = ["cold-buffer", "spill-ring/std"]
+default = []
+derive = ["dep:pebble-macros"]
+std = ["spill-ring/std"]
+serde = ["bytecast/serde"]
+facet = ["bytecast/facet"]
+rkyv = ["bytecast/rkyv"]
 verdict = []
 
 [dependencies]
-bytecast = { path = "../bytecast", optional = true, default-features = false, features = ["alloc", "derive"] }
+bytecast = { path = "../bytecast", default-features = false, features = ["alloc", "derive"] }
 hashbrown = "0.15"
+pebble-macros = { path = "../pebble-macros", optional = true }
 spill-ring = { path = "../spill-ring", default-features = false }
 spout = { path = "../spout" }
 verdict = { path = "../verdict", default-features = false }
 
 [[example]]
+name = "basic"
+required-features = ["derive", "serde"]
+
+[[example]]
 name = "files"
-required-features = ["cold-buffer", "bytecast"]
+required-features = ["derive"]
 
 [[example]]
 name = "pebble_rebuild"
@@ -30,3 +37,5 @@ name = "pebble_rebuild"
 name = "pebble_branching"
 
 [dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -7,15 +7,16 @@ use core::hash::Hash;
 use spout::Spout;
 
 pub use crate::errors::manager::DirectStorageError;
-use crate::manager::traits::{CheckpointSerializer, Checkpointable};
+use crate::manager::traits::Checkpointable;
 use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use bytecast::ByteSerializer;
 
 use super::{ColdTier, RecoverableColdTier};
 
 /// Unbuffered cold tier: serialize and send immediately.
 ///
-/// `DirectStorage` pairs a storage backend with a serializer. Every
-/// `store()` call serializes the checkpoint and sends it to storage
+/// `DirectStorage` pairs a storage backend with bytecast serialization.
+/// Every `store()` call serializes the checkpoint and sends it to storage
 /// in one step — no ring buffer, no batching. `buffered_count()` is
 /// always zero.
 ///
@@ -24,19 +25,14 @@ use super::{ColdTier, RecoverableColdTier};
 /// # Type Parameters
 /// - `S` — Storage backend implementing [`Spout`] (for writes) and
 ///   [`CheckpointLoader`] (for reads)
-/// - `Ser` — Checkpoint serializer
-pub struct DirectStorage<S, Ser> {
+pub struct DirectStorage<S> {
     storage: S,
-    serializer: Ser,
 }
 
-impl<S, Ser> DirectStorage<S, Ser> {
-    /// Create a new direct storage tier with a custom serializer.
-    pub fn new(storage: S, serializer: Ser) -> Self {
-        Self {
-            storage,
-            serializer,
-        }
+impl<S> DirectStorage<S> {
+    /// Create a new direct storage tier.
+    pub fn new(storage: S) -> Self {
+        Self { storage }
     }
 
     /// Borrow the underlying storage.
@@ -50,25 +46,39 @@ impl<S, Ser> DirectStorage<S, Ser> {
     }
 }
 
-#[cfg(feature = "bytecast")]
-impl<S> DirectStorage<S, super::super::BytecastSerializer> {
-    /// Create a new direct storage tier using `BytecastSerializer`.
-    pub fn with_storage(storage: S) -> Self {
-        Self::new(storage, super::super::BytecastSerializer)
+/// Debug-only file-backed cold tier for development testing.
+///
+/// Persists checkpoints to `pebble_debug/` in the system temp dir.
+/// Does not exist in release builds — forces choosing a real backend.
+#[cfg(all(debug_assertions, feature = "std"))]
+impl DirectStorage<crate::storage::DebugFileStorage> {
+    /// Create a debug cold tier backed by temp files.
+    pub fn debug() -> Self {
+        Self::new(crate::storage::DebugFileStorage::new())
     }
 }
 
-impl<T, S, Ser> ColdTier<T> for DirectStorage<S, Ser>
+/// Debug-only in-memory cold tier for development testing.
+///
+/// Falls back to in-memory storage when `std` is not available.
+/// Does not exist in release builds — forces choosing a real backend.
+#[cfg(all(debug_assertions, not(feature = "std")))]
+impl DirectStorage<crate::storage::InMemoryStorage> {
+    /// Create a debug cold tier backed by in-memory storage.
+    pub fn debug() -> Self {
+        Self::new(crate::storage::InMemoryStorage::new())
+    }
+}
+
+impl<T, S> ColdTier<T> for DirectStorage<S>
 where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     S: Spout<(T::Id, Vec<u8>)> + CheckpointLoader<T::Id>,
-    Ser: CheckpointSerializer<T>,
 {
-    type Error = DirectStorageError<Ser::Error>;
+    type Error = DirectStorageError;
 
     fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
-        let bytes = self
-            .serializer
+        let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
         let _ = self.storage.send((id, bytes));
@@ -77,7 +87,7 @@ where
 
     fn load(&self, id: T::Id) -> Result<T, Self::Error> {
         let bytes = self.storage.load(id)?;
-        self.serializer
+        ByteSerializer
             .deserialize(&bytes)
             .map_err(|source| DirectStorageError::Serializer { source })
     }
@@ -96,13 +106,11 @@ where
     }
 }
 
-impl<T, S, Ser, SId, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS>
-    for DirectStorage<S, Ser>
+impl<T, S, SId, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS> for DirectStorage<S>
 where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
     S: Spout<(T::Id, Vec<u8>)> + RecoverableStorage<T::Id, SId, MAX_DEPS>,
-    Ser: CheckpointSerializer<T>,
     SId: SessionId,
 {
     type MetadataIter<'a>

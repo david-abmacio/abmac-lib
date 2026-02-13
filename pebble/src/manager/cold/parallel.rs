@@ -3,7 +3,7 @@
 //! Checkpoints are serialized eagerly in `store()`, then batched and
 //! distributed across worker threads for parallel I/O. Each worker
 //! owns a SpillRing; overflow spills to shared storage automatically.
-//! Requires the `cold-buffer-std` feature.
+//! Requires the `std` feature.
 
 extern crate alloc;
 extern crate std;
@@ -14,8 +14,9 @@ use core::hash::Hash;
 use spill_ring::{MpscRing, SpillRing};
 use spout::Spout;
 
-use crate::manager::traits::{CheckpointSerializer, Checkpointable};
+use crate::manager::traits::Checkpointable;
 use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use bytecast::ByteSerializer;
 
 pub use super::direct::DirectStorageError;
 use super::{ColdTier, RecoverableColdTier};
@@ -60,37 +61,34 @@ type IoPool<CId, const N: usize, S> = spill_ring::WorkerPool<
 /// storage via the spout. [`flush()`](ColdTier::flush) joins all
 /// workers, drains remaining items to storage, then recreates the pool.
 ///
-/// Requires the `cold-buffer-std` feature.
+/// Requires the `std` feature.
 ///
 /// # Type Parameters
 /// - `CId` — Checkpoint ID type
 /// - `S` — Storage backend (must be `Clone + Send + 'static`)
-/// - `Ser` — Checkpoint serializer
 /// - `N` — Per-worker ring buffer capacity (const generic)
-pub struct ParallelCold<CId, S, Ser, const N: usize>
+pub struct ParallelCold<CId, S, const N: usize>
 where
     CId: Copy + Send + Sync + 'static,
     S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
 {
     storage: S,
-    serializer: Ser,
     pool: Option<IoPool<CId, N, S>>,
     num_workers: usize,
     /// Serialized items accumulated between `store()` calls.
     pending: Vec<(CId, Vec<u8>)>,
 }
 
-impl<CId, S, Ser, const N: usize> ParallelCold<CId, S, Ser, N>
+impl<CId, S, const N: usize> ParallelCold<CId, S, N>
 where
     CId: Copy + Send + Sync + 'static,
     S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
 {
-    /// Create a new parallel cold tier with a custom serializer.
-    pub fn new(storage: S, serializer: Ser, num_workers: usize) -> Self {
+    /// Create a new parallel cold tier.
+    pub fn new(storage: S, num_workers: usize) -> Self {
         let pool = Self::create_pool(num_workers, storage.clone());
         Self {
             storage,
-            serializer,
             pool: Some(pool),
             num_workers,
             pending: Vec::new(),
@@ -134,35 +132,21 @@ where
     }
 }
 
-#[cfg(feature = "bytecast")]
-impl<CId, S, const N: usize> ParallelCold<CId, S, crate::manager::BytecastSerializer, N>
+impl<T, S, const N: usize> ColdTier<T> for ParallelCold<T::Id, S, N>
 where
-    CId: Copy + Send + Sync + 'static,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
-{
-    /// Create a new parallel cold tier using `BytecastSerializer`.
-    pub fn with_storage(storage: S, num_workers: usize) -> Self {
-        Self::new(storage, crate::manager::BytecastSerializer, num_workers)
-    }
-}
-
-impl<T, S, Ser, const N: usize> ColdTier<T> for ParallelCold<T::Id, S, Ser, N>
-where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Send + Sync + 'static,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
         + CheckpointLoader<T::Id>
         + Clone
         + Send
         + 'static,
-    Ser: CheckpointSerializer<T>,
 {
-    type Error = DirectStorageError<Ser::Error>;
+    type Error = DirectStorageError;
 
     fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
         // Serialize eagerly on the caller's thread.
-        let bytes = self
-            .serializer
+        let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
 
@@ -176,7 +160,7 @@ where
 
     fn load(&self, id: T::Id) -> Result<T, Self::Error> {
         let bytes = self.storage.load(id)?;
-        self.serializer
+        ByteSerializer
             .deserialize(&bytes)
             .map_err(|source| DirectStorageError::Serializer { source })
     }
@@ -203,17 +187,16 @@ where
     }
 }
 
-impl<T, S, Ser, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS>
-    for ParallelCold<T::Id, S, Ser, N>
+impl<T, S, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS>
+    for ParallelCold<T::Id, S, N>
 where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash + Send + Sync + 'static,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>
         + Clone
         + Send
         + 'static,
-    Ser: CheckpointSerializer<T>,
     SId: SessionId,
 {
     type MetadataIter<'a>
@@ -262,7 +245,7 @@ where
 // PebbleManager::Drop calls flush() which drains pending, but standalone
 // usage must flush explicitly before dropping — matching the Spout
 // ecosystem convention (BatchSpout, ReduceSpout, etc.).
-impl<CId, S, Ser, const N: usize> Drop for ParallelCold<CId, S, Ser, N>
+impl<CId, S, const N: usize> Drop for ParallelCold<CId, S, N>
 where
     CId: Copy + Send + Sync + 'static,
     S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,

@@ -2,7 +2,13 @@
 
 pub mod memory;
 
-pub use memory::{InMemoryStorage, crc32};
+#[cfg(all(debug_assertions, feature = "std"))]
+pub mod debug;
+
+pub use memory::InMemoryStorage;
+
+#[cfg(all(debug_assertions, feature = "std"))]
+pub use debug::DebugFileStorage;
 
 use alloc::vec::Vec;
 use core::hash::Hash;

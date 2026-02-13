@@ -1,96 +1,20 @@
 //! Tests for PebbleManager.
 
 use alloc::vec;
-use alloc::vec::Vec;
 
 use spout::DropSpout;
 
-use crate::manager::{
-    CheckpointSerializer, Checkpointable, DirectStorage, Manifest, NoWarm, PebbleManager,
-    PebbleManagerError,
-};
+use crate::manager::{DirectStorage, Manifest, NoWarm, PebbleManager, PebbleManagerError};
 use crate::storage::InMemoryStorage;
 use crate::strategy::Strategy;
 
-// Test fixtures
-
-#[derive(Debug, Clone)]
-struct TestCheckpoint {
-    id: u64,
-    data: alloc::string::String,
-}
-
-impl Checkpointable for TestCheckpoint {
-    type Id = u64;
-    type RebuildError = ();
-
-    fn checkpoint_id(&self) -> Self::Id {
-        self.id
-    }
-
-    fn compute_from_dependencies(
-        base: Self,
-        _deps: &hashbrown::HashMap<Self::Id, &Self>,
-    ) -> core::result::Result<Self, Self::RebuildError> {
-        Ok(base)
-    }
-}
-
-/// Test serialization error type with meaningful context.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TestSerializerError {
-    TooShort { expected: usize, actual: usize },
-}
-
-impl core::fmt::Display for TestSerializerError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::TooShort { expected, actual } => {
-                write!(
-                    f,
-                    "buffer too short: expected {expected} bytes, got {actual}"
-                )
-            }
-        }
-    }
-}
-
-struct TestSerializer;
-
-impl CheckpointSerializer<TestCheckpoint> for TestSerializer {
-    type Error = TestSerializerError;
-
-    fn serialize(&self, value: &TestCheckpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        // Format: id (8) + data
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&value.id.to_le_bytes());
-        bytes.extend_from_slice(value.data.as_bytes());
-        Ok(bytes)
-    }
-
-    fn deserialize(&self, bytes: &[u8]) -> core::result::Result<TestCheckpoint, Self::Error> {
-        if bytes.len() < 8 {
-            return Err(TestSerializerError::TooShort {
-                expected: 8,
-                actual: bytes.len(),
-            });
-        }
-        let id = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        let data = alloc::string::String::from_utf8_lossy(&bytes[8..]).into_owned();
-        Ok(TestCheckpoint { id, data })
-    }
-}
-
-/// Helper: create a DirectStorage cold tier for tests.
-fn test_cold() -> DirectStorage<InMemoryStorage<u64, u128, 8>, TestSerializer> {
-    DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), TestSerializer)
-}
+use super::fixtures::{TestCheckpoint, test_cold};
 
 // Basic operations
 
 #[test]
 fn test_basic_add_and_get() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -110,7 +34,7 @@ fn test_basic_add_and_get() {
 
 #[test]
 fn test_insert_zero_copy() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -133,7 +57,7 @@ fn test_insert_zero_copy() {
 
 #[test]
 fn test_insert_with_dependencies() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -167,7 +91,7 @@ fn test_insert_with_dependencies() {
 
 #[test]
 fn test_eviction() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -195,7 +119,7 @@ fn test_eviction() {
 
 #[test]
 fn test_load_from_storage() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -232,7 +156,7 @@ fn test_load_from_storage() {
 
 #[test]
 fn test_compress() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -268,7 +192,7 @@ fn test_compress() {
 
 #[test]
 fn test_stats() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -295,7 +219,7 @@ fn test_stats() {
 
 #[test]
 fn test_rebuild_simple() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -330,7 +254,7 @@ fn test_rebuild_simple() {
 
 #[test]
 fn test_rebuild_from_hot() {
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -352,7 +276,7 @@ fn test_rebuild_from_hot() {
 
 #[test]
 fn test_rebuild_not_found() {
-    let mut manager: PebbleManager<TestCheckpoint, _, _, _> = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -371,7 +295,7 @@ fn test_rebuild_not_found() {
 fn test_theoretical_validation_space_bound() {
     // 100 nodes with hot_capacity=10 (sqrt(100)=10, 2x=20)
     // Should satisfy space bound since 10 <= 20
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -409,7 +333,7 @@ fn test_theoretical_validation_space_bound_exceeded() {
     // 16 nodes with hot_capacity=100
     // sqrt(16) = 4, 2x = 8, but we have 100
     // Should NOT satisfy space bound
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -440,7 +364,7 @@ fn test_theoretical_validation_io_bound() {
     // The DAG bound (3.0x) is an asymptotic guarantee — small workloads
     // may exceed it — so we test that the ratio is computed correctly
     // rather than that it satisfies the bound at toy scale.
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -511,7 +435,7 @@ fn test_recover_cold_start() {
 #[test]
 fn test_recover_warm_restart() {
     // First, populate storage with checkpoints
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -543,7 +467,7 @@ fn test_recover_warm_restart() {
     );
 
     // Recover from storage
-    let cold = DirectStorage::new(storage, TestSerializer);
+    let cold = DirectStorage::new(storage);
     let (recovered_manager, result) = PebbleManager::<TestCheckpoint, _, _, _>::recover(
         cold,
         NoWarm,
@@ -564,7 +488,7 @@ fn test_recover_warm_restart() {
 #[test]
 fn test_recover_with_dependencies() {
     // Create storage with dependent checkpoints
-    let mut manager = PebbleManager::new(
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -602,7 +526,7 @@ fn test_recover_with_dependencies() {
     );
 
     // Recover - should recover what was in storage
-    let cold = DirectStorage::new(storage, TestSerializer);
+    let cold = DirectStorage::new(storage);
     let (recovered_manager, result) = PebbleManager::<TestCheckpoint, _, _, _>::recover(
         cold,
         NoWarm,
@@ -620,7 +544,6 @@ fn test_recover_with_dependencies() {
 
 // Cold-buffer tier integration
 
-#[cfg(feature = "cold-buffer")]
 mod cold_buffer {
     use super::*;
     use crate::manager::{RingCold, WarmCache};
@@ -628,16 +551,16 @@ mod cold_buffer {
 
     type BufferedMgr = PebbleManager<
         TestCheckpoint,
-        RingCold<u64, InMemoryStorage<u64, u128, 8>, TestSerializer, 64>,
+        RingCold<u64, InMemoryStorage<u64, u128, 8>, 64>,
         WarmCache<TestCheckpoint>,
         DropSpout,
     >;
 
     /// Helper: create a RingCold + WarmCache manager for cold-buffer tests.
     fn test_spill_manager(hot_capacity: usize) -> BufferedMgr {
-        let cold = RingCold::new(InMemoryStorage::<u64, u128, 8>::new(), TestSerializer);
+        let cold = RingCold::new(InMemoryStorage::<u64, u128, 8>::new());
         let warm = WarmCache::new();
-        PebbleManager::new(
+        PebbleManager::<TestCheckpoint, _, _, _>::new(
             cold,
             warm,
             Manifest::new(DropSpout),
@@ -947,31 +870,42 @@ mod cold_buffer {
 // Builder
 
 #[test]
-fn build_rejects_zero_hot_capacity() {
-    use crate::manager::PebbleManagerBuilder;
+fn build_clamps_zero_hot_capacity() {
+    use crate::manager::PebbleBuilder;
 
-    let result = PebbleManagerBuilder::new()
+    // hot_capacity=0 is silently clamped to 1 (infallible build)
+    let mut manager = PebbleBuilder::new()
         .cold(test_cold())
         .warm(NoWarm)
+        .log(DropSpout)
         .hot_capacity(0)
-        .build::<TestCheckpoint, _>(Manifest::new(DropSpout));
+        .build::<TestCheckpoint>();
 
-    assert!(result.is_err());
-    assert_eq!(result.err().unwrap(), crate::BuilderError::ZeroHotCapacity,);
+    // Should work with clamped capacity of 1
+    manager
+        .add(
+            TestCheckpoint {
+                id: 1,
+                data: "ok".into(),
+            },
+            &[],
+        )
+        .unwrap();
+    assert!(manager.is_hot(1));
 }
 
 #[test]
 fn hint_total_checkpoints_computes_sqrt() {
-    use crate::manager::PebbleManagerBuilder;
+    use crate::manager::PebbleBuilder;
 
     // sqrt(10_000) = 100, so hot_capacity should be 100
     // Verify via eviction threshold: add 100 items without eviction
-    let mut manager = PebbleManagerBuilder::new()
+    let mut manager = PebbleBuilder::new()
         .cold(test_cold())
         .warm(NoWarm)
+        .log(DropSpout)
         .hint_total_checkpoints(10_000)
-        .build::<TestCheckpoint, _>(Manifest::new(DropSpout))
-        .unwrap();
+        .build::<TestCheckpoint>();
 
     for i in 0..100 {
         manager
@@ -1001,21 +935,17 @@ fn hint_total_checkpoints_computes_sqrt() {
     assert!(manager.stats().blue_pebble_count() > 0 || manager.stats().red_pebble_count() <= 100);
 }
 
-#[cfg(feature = "cold-buffer")]
 #[test]
 fn builder_warm_capacity_configurable() {
-    use crate::manager::{PebbleManagerBuilder, RingCold, WarmCache};
+    use crate::manager::{PebbleBuilder, RingCold, WarmCache};
 
-    let cold = RingCold::<u64, _, TestSerializer, 64>::new(
-        InMemoryStorage::<u64, u128, 8>::new(),
-        TestSerializer,
-    );
-    let mut manager = PebbleManagerBuilder::new()
+    let cold = RingCold::<u64, _, 64>::new(InMemoryStorage::<u64, u128, 8>::new());
+    let mut manager = PebbleBuilder::new()
         .cold(cold)
         .warm(WarmCache::<TestCheckpoint>::with_capacity(2))
+        .log(DropSpout)
         .hot_capacity(4)
-        .build::<TestCheckpoint, _>(Manifest::new(DropSpout))
-        .unwrap();
+        .build::<TestCheckpoint>();
 
     // hot=4, warm_capacity=2
     // Adds 0..6: 4 hot, 2 warm (full)

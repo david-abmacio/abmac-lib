@@ -35,7 +35,7 @@ const HOT_CAPACITY: usize = 3;
 //   #3 = 488   depends on #2:  (300 - 56) * 2
 //   #4 = 125   depends on #3:  (488 + 12) / 4
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, bytecast::DeriveToBytes, bytecast::DeriveFromBytes)]
 struct RebuildCheckpoint {
     id: u64,
     value: u64,
@@ -68,31 +68,9 @@ impl Checkpointable for RebuildCheckpoint {
     }
 }
 
-struct RebuildSer;
-
-impl CheckpointSerializer<RebuildCheckpoint> for RebuildSer {
-    type Error = &'static str;
-
-    fn serialize(&self, cp: &RebuildCheckpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        let mut b = Vec::with_capacity(16);
-        b.extend_from_slice(&cp.id.to_be_bytes());
-        b.extend_from_slice(&cp.value.to_be_bytes());
-        Ok(b)
-    }
-
-    fn deserialize(&self, b: &[u8]) -> core::result::Result<RebuildCheckpoint, Self::Error> {
-        if b.len() < 16 {
-            return Err("too small");
-        }
-        let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
-        let value = u64::from_be_bytes(b[8..16].try_into().unwrap());
-        Ok(RebuildCheckpoint { id, value })
-    }
-}
-
 type RebuildMgr = PebbleManager<
     RebuildCheckpoint,
-    DirectStorage<InMemoryStorage<u64, u128, 16>, RebuildSer>,
+    DirectStorage<InMemoryStorage<u64, u128, 16>>,
     NoWarm,
     spout::DropSpout,
 >;
@@ -125,14 +103,13 @@ struct Step {
 // Then we load one from cold and rebuild another from the dep chain.
 
 fn main() {
-    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new(), RebuildSer);
-    let mut mgr = RebuildMgr::new(
-        cold,
-        NoWarm,
-        Manifest::new(spout::DropSpout),
-        Strategy::default(),
-        HOT_CAPACITY,
-    );
+    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new());
+    let mut mgr: RebuildMgr = PebbleBuilder::new()
+        .cold(cold)
+        .warm(NoWarm)
+        .log(spout::DropSpout)
+        .hot_capacity(HOT_CAPACITY)
+        .build::<RebuildCheckpoint>();
     let mut val: u64 = 0;
     let mut step_n: u64 = 0;
     let mut flow: Vec<FlowNode> = Vec::new();

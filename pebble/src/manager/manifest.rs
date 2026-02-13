@@ -53,7 +53,7 @@ where
     S: Spout<ManifestEntry<CId, MAX_DEPS>, Error = Infallible>,
 {
     /// Create a new manifest draining to the given spout.
-    pub fn new(spout: S) -> Self {
+    pub(crate) fn new(spout: S) -> Self {
         Self {
             ring: SpillRing::with_sink(spout),
             seq: 0,

@@ -2,65 +2,17 @@
 
 use spout::DropSpout;
 
-use crate::manager::{DirectStorage, Manifest, NoWarm, PebbleManager, PebbleManagerError};
-use crate::storage::InMemoryStorage;
+use crate::manager::{Manifest, NoWarm, PebbleManager, PebbleManagerError};
 use crate::strategy::Strategy;
 
-// Reuse the test fixtures from manager tests.
-
-#[derive(Debug, Clone)]
-struct Cp {
-    id: u64,
-}
-
-impl crate::manager::Checkpointable for Cp {
-    type Id = u64;
-    type RebuildError = ();
-
-    fn checkpoint_id(&self) -> u64 {
-        self.id
-    }
-
-    fn compute_from_dependencies(
-        base: Self,
-        _deps: &hashbrown::HashMap<Self::Id, &Self>,
-    ) -> core::result::Result<Self, ()> {
-        Ok(base)
-    }
-}
-
-struct Ser;
-
-impl crate::manager::CheckpointSerializer<Cp> for Ser {
-    type Error = &'static str;
-
-    fn serialize(&self, cp: &Cp) -> core::result::Result<alloc::vec::Vec<u8>, &'static str> {
-        Ok(cp.id.to_le_bytes().to_vec())
-    }
-
-    fn deserialize(&self, bytes: &[u8]) -> core::result::Result<Cp, &'static str> {
-        if bytes.len() < 8 {
-            return Err("too short");
-        }
-        let id = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
-        Ok(Cp { id })
-    }
-}
-
-fn cold() -> DirectStorage<InMemoryStorage<u64, u128, 8>, Ser> {
-    DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), Ser)
-}
-
-fn cp(id: u64) -> Cp {
-    Cp { id }
-}
+use super::fixtures::{TestCheckpoint, cp, test_cold};
 
 // --- CheckpointRef tests ---
 
 #[test]
 fn test_add_ref_returns_token() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -73,8 +25,8 @@ fn test_add_ref_returns_token() {
 
 #[test]
 fn test_insert_ref_returns_token() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -87,8 +39,8 @@ fn test_insert_ref_returns_token() {
 
 #[test]
 fn test_locate_found() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -102,8 +54,8 @@ fn test_locate_found() {
 
 #[test]
 fn test_locate_not_found() {
-    let mgr = PebbleManager::new(
-        cold(),
+    let mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -114,8 +66,8 @@ fn test_locate_not_found() {
 
 #[test]
 fn test_load_ref() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -128,8 +80,8 @@ fn test_load_ref() {
 
 #[test]
 fn test_rebuild_ref() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -142,8 +94,8 @@ fn test_rebuild_ref() {
 
 #[test]
 fn test_stale_token() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -162,8 +114,8 @@ fn test_stale_token() {
 
 #[test]
 fn test_ensure_capacity_when_not_full() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -180,8 +132,8 @@ fn test_ensure_capacity_when_not_full() {
 
 #[test]
 fn test_ensure_capacity_evicts_when_full() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),
@@ -201,8 +153,8 @@ fn test_ensure_capacity_evicts_when_full() {
 
 #[test]
 fn test_guard_insert() {
-    let mut mgr = PebbleManager::new(
-        cold(),
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
         Strategy::default(),

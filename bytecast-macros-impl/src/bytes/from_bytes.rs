@@ -4,21 +4,11 @@ use super::{
     disc_capacity, field_type_bounds, has_boxed_attr, has_skip_attr, reject_enum_field_attrs,
     repr_int_type, resolve_discriminants, serializable_type, validate_struct_field_attrs,
 };
-use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, parse_macro_input};
+use syn::{Data, DeriveInput, Fields};
 
-pub fn derive_from_bytes(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-
-    match derive_impl(&input) {
-        Ok(tokens) => tokens.into(),
-        Err(e) => e.to_compile_error().into(),
-    }
-}
-
-fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
+pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let name = &input.ident;
     let mut generics = input.generics.clone();
     let extra_bounds = field_type_bounds(input, syn::parse_quote!(bytecast::FromBytes))?;
@@ -51,7 +41,7 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
     Ok(quote! {
         impl #impl_generics bytecast::FromBytes for #name #ty_generics #where_clause {
-            fn from_bytes(buf: &[u8]) -> Result<(Self, usize), bytecast::BytesError> {
+            fn from_bytes(buf: &[u8]) -> ::core::result::Result<(Self, usize), bytecast::BytesError> {
                 let mut offset = 0usize;
                 #body
             }

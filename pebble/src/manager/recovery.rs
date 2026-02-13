@@ -25,7 +25,7 @@ where
     S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Recover state from existing storage.
-    pub fn recover(
+    pub(crate) fn recover(
         cold: C,
         warm: W,
         manifest: Manifest<T::Id, S>,

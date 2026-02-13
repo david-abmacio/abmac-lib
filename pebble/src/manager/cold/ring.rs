@@ -10,8 +10,9 @@ use core::hash::Hash;
 use spill_ring::SpillRing;
 use spout::Spout;
 
-use crate::manager::traits::{CheckpointSerializer, Checkpointable};
+use crate::manager::traits::Checkpointable;
 use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use bytecast::ByteSerializer;
 
 pub use super::direct::DirectStorageError;
 use super::{ColdTier, RecoverableColdTier};
@@ -22,34 +23,30 @@ use super::{ColdTier, RecoverableColdTier};
 /// Overflow spills to the storage backend `S` automatically. `flush()`
 /// drains the ring and flushes the storage.
 ///
-/// Requires the `cold-buffer` feature.
+/// Always available (no feature gate required).
 ///
 /// # Type Parameters
 /// - `CId` — Checkpoint ID type
 /// - `S` — Storage backend implementing [`Spout`] (for writes) and
 ///   [`CheckpointLoader`] (for reads)
-/// - `Ser` — Checkpoint serializer
 /// - `N` — Ring buffer capacity (const generic)
 pub struct RingCold<
     CId,
     S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
-    Ser,
     const N: usize,
 > {
     ring: SpillRing<(CId, Vec<u8>), N, S>,
-    serializer: Ser,
 }
 
-impl<CId, S, Ser, const N: usize> RingCold<CId, S, Ser, N>
+impl<CId, S, const N: usize> RingCold<CId, S, N>
 where
     CId: Copy,
     S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
 {
-    /// Create a new ring-buffered cold tier with a custom serializer.
-    pub fn new(storage: S, serializer: Ser) -> Self {
+    /// Create a new ring-buffered cold tier.
+    pub fn new(storage: S) -> Self {
         Self {
             ring: SpillRing::with_sink(storage),
-            serializer,
         }
     }
 
@@ -64,29 +61,15 @@ where
     }
 }
 
-#[cfg(feature = "bytecast")]
-impl<CId, S, const N: usize> RingCold<CId, S, super::super::BytecastSerializer, N>
+impl<T, S, const N: usize> ColdTier<T> for RingCold<T::Id, S, N>
 where
-    CId: Copy,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
-{
-    /// Create a new ring-buffered cold tier using `BytecastSerializer`.
-    pub fn with_storage(storage: S) -> Self {
-        Self::new(storage, super::super::BytecastSerializer)
-    }
-}
-
-impl<T, S, Ser, const N: usize> ColdTier<T> for RingCold<T::Id, S, Ser, N>
-where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible> + CheckpointLoader<T::Id>,
-    Ser: CheckpointSerializer<T>,
 {
-    type Error = DirectStorageError<Ser::Error>;
+    type Error = DirectStorageError;
 
     fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
-        let bytes = self
-            .serializer
+        let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
         self.ring.push_mut((id, bytes));
@@ -95,7 +78,7 @@ where
 
     fn load(&self, id: T::Id) -> Result<T, Self::Error> {
         let bytes = self.ring.sink_ref().load(id)?;
-        self.serializer
+        ByteSerializer
             .deserialize(&bytes)
             .map_err(|source| DirectStorageError::Serializer { source })
     }
@@ -115,14 +98,13 @@ where
     }
 }
 
-impl<T, S, Ser, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS>
-    for RingCold<T::Id, S, Ser, N>
+impl<T, S, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS>
+    for RingCold<T::Id, S, N>
 where
-    T: Checkpointable,
+    T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>,
-    Ser: CheckpointSerializer<T>,
     SId: SessionId,
 {
     type MetadataIter<'a>

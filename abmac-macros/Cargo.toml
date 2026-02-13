@@ -7,10 +7,14 @@ description = "Umbrella re-export of ABMAC derive macros"
 
 [dependencies]
 bytecast-macros = { path = "../bytecast-macros", optional = true }
+pebble-macros = { path = "../pebble-macros", optional = true }
 
 [dev-dependencies]
 bytecast = { path = "../bytecast", features = ["derive", "alloc"] }
+pebble = { path = "../pebble", features = ["derive"] }
+hashbrown = "0.15"
 
 [features]
 default = []
 bytecast = ["dep:bytecast-macros"]
+pebble = ["dep:pebble-macros"]

@@ -6,25 +6,6 @@ use crate::errors::dag::DAGError;
 use crate::errors::storage::StorageError;
 use crate::manager::BranchId;
 
-// ── BuilderError ───────────────────────────────────────────────────────
-
-/// Error returned by [`PebbleManagerBuilder::build`](crate::manager::builder::PebbleManagerBuilder).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuilderError {
-    /// `hot_capacity` was set to 0.
-    ZeroHotCapacity,
-}
-
-impl core::fmt::Display for BuilderError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::ZeroHotCapacity => write!(f, "hot_capacity must be at least 1"),
-        }
-    }
-}
-
-impl core::error::Error for BuilderError {}
-
 // ── BranchError ────────────────────────────────────────────────────────
 
 verdict::display_error! {
@@ -51,18 +32,16 @@ verdict::display_error! {
     /// Error type for [`DirectStorage`](crate::manager::cold::DirectStorage) operations.
     ///
     /// Wraps either a serialization/deserialization error or a storage error.
-    pub enum DirectStorageError<SerErr: core::fmt::Debug + core::fmt::Display> {
+    pub enum DirectStorageError {
         #[display("serializer error: {source}")]
-        Serializer { source: SerErr },
+        Serializer { source: bytecast::BytesError },
 
         #[display("storage error: {source}")]
         Storage { source: StorageError },
     }
 }
 
-impl<SerErr: core::fmt::Debug + core::fmt::Display> From<StorageError>
-    for DirectStorageError<SerErr>
-{
+impl From<StorageError> for DirectStorageError {
     fn from(e: StorageError) -> Self {
         Self::Storage { source: e }
     }
@@ -76,9 +55,7 @@ verdict::display_error! {
     /// # Type Parameters
     /// - `Id` -- checkpoint identifier type, preserving the typed value from
     ///   [`Checkpointable::Id`](crate::manager::traits::Checkpointable).
-    /// - `E` -- serializer error type, preserving the original error from
-    ///   [`CheckpointSerializer`](crate::manager::traits::CheckpointSerializer) for
-    ///   programmatic inspection.
+    /// - `E` -- cold tier error type for programmatic inspection.
     ///
     /// Use [`ErasedPebbleManagerError`] (alias for `PebbleManagerError<String, String>`)
     /// when neither the typed ID nor the serializer error is needed.

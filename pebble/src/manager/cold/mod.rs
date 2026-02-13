@@ -1,19 +1,31 @@
 //! Cold-tier storage trait and implementations.
 
 mod direct;
-#[cfg(feature = "cold-buffer-std")]
+#[cfg(feature = "std")]
 mod parallel;
-#[cfg(feature = "cold-buffer")]
 mod ring;
 
 use super::traits::Checkpointable;
 use crate::storage::{CheckpointMetadata, SessionId};
 
 pub use direct::{DirectStorage, DirectStorageError};
-#[cfg(feature = "cold-buffer-std")]
+#[cfg(feature = "std")]
 pub use parallel::ParallelCold;
-#[cfg(feature = "cold-buffer")]
 pub use ring::RingCold;
+
+/// Debug-only cold tier type alias.
+///
+/// Resolves to file-backed storage (with `std`) or in-memory
+/// storage (without). Does not exist in release builds.
+#[cfg(all(debug_assertions, feature = "std"))]
+pub type DebugCold = DirectStorage<crate::storage::DebugFileStorage>;
+
+/// Debug-only cold tier type alias.
+///
+/// Falls back to in-memory storage when `std` is not available.
+/// Does not exist in release builds.
+#[cfg(all(debug_assertions, not(feature = "std")))]
+pub type DebugCold = DirectStorage<crate::storage::InMemoryStorage>;
 
 /// Cold-side storage abstraction.
 ///
@@ -23,8 +35,8 @@ pub use ring::RingCold;
 ///
 /// Three implementations:
 /// - [`DirectStorage`] — serialize and send immediately, no buffering (always available)
-/// - [`RingCold`] — serialize into a SpillRing (requires `cold-buffer`)
-/// - [`ParallelCold`] — parallel I/O across a WorkerPool (requires `cold-buffer-std`)
+/// - [`RingCold`] — serialize into a SpillRing (always available)
+/// - [`ParallelCold`] — parallel I/O across a WorkerPool (requires `std`)
 pub trait ColdTier<T: Checkpointable> {
     /// Error type for storage operations.
     type Error: core::fmt::Debug + core::fmt::Display;

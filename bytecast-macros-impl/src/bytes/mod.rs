@@ -3,8 +3,8 @@
 mod from_bytes;
 mod to_bytes;
 
-pub use from_bytes::derive_from_bytes;
-pub use to_bytes::derive_to_bytes;
+pub use from_bytes::derive_impl as derive_from_bytes_impl;
+pub use to_bytes::derive_impl as derive_to_bytes_impl;
 
 /// Extract the discriminant type from `#[repr(uN)]` on an enum.
 /// Returns `None` if no repr or a non-integer repr is used (defaults to u8).

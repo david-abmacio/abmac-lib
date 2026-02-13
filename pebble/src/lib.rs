@@ -13,38 +13,22 @@
 //! # Quick Start
 //!
 //! ```
-//! use pebble::{PebbleManagerBuilder, InMemoryStorage, Checkpointable, CheckpointSerializer, DirectStorage, Manifest, NoWarm};
+//! use pebble::{Checkpoint, PebbleBuilder, InMemoryStorage, DirectStorage, NoWarm};
 //! use spout::DropSpout;
 //!
-//! #[derive(Clone)]
-//! struct MyCheckpoint { id: u64, data: Vec<u8> }
-//!
-//! impl Checkpointable for MyCheckpoint {
-//!     type Id = u64;
-//!     type RebuildError = ();
-//!     fn checkpoint_id(&self) -> u64 { self.id }
-//!     fn compute_from_dependencies(
-//!         base: Self, _deps: &hashbrown::HashMap<Self::Id, &Self>,
-//!     ) -> Result<Self, Self::RebuildError> { Ok(base) }
+//! #[derive(Clone, Debug, Checkpoint)]
+//! struct MyCheckpoint {
+//!     #[checkpoint(id)]
+//!     id: u64,
+//!     data: Vec<u8>,
 //! }
 //!
-//! struct MySerializer;
-//! impl CheckpointSerializer<MyCheckpoint> for MySerializer {
-//!     type Error = &'static str;
-//!     fn serialize(&self, _cp: &MyCheckpoint) -> Result<Vec<u8>, &'static str> { Ok(vec![]) }
-//!     fn deserialize(&self, _bytes: &[u8]) -> Result<MyCheckpoint, &'static str> {
-//!         Ok(MyCheckpoint { id: 0, data: vec![] })
-//!     }
-//! }
-//!
-//! let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), MySerializer);
-//! let manifest = Manifest::new(DropSpout);
-//! let mut manager = PebbleManagerBuilder::new()
-//!     .cold(cold)
+//! let mut manager = PebbleBuilder::new()
+//!     .cold(DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new()))
 //!     .warm(NoWarm)
+//!     .log(DropSpout)
 //!     .hot_capacity(16)
-//!     .build::<MyCheckpoint, _>(manifest)
-//!     .unwrap();
+//!     .build::<MyCheckpoint>();
 //!
 //! manager.add(MyCheckpoint { id: 1, data: vec![1, 2, 3] }, &[]).unwrap();
 //! ```
@@ -58,12 +42,13 @@
 
 extern crate alloc;
 
-pub mod dag;
-pub mod errors;
-pub mod game;
+pub(crate) mod dag;
+pub(crate) mod errors;
+#[allow(dead_code)]
+pub(crate) mod game;
 pub mod manager;
-pub mod storage;
-pub mod strategy;
+pub(crate) mod storage;
+pub(crate) mod strategy;
 
 #[cfg(feature = "verdict")]
 mod verdict_support;
@@ -73,51 +58,45 @@ mod tests;
 
 pub use hashbrown::HashMap;
 
-pub use dag::{ComputationDAG, DAGError, DAGNode, DAGStats};
-pub use game::{PebbleColor, PebbleError, PebbleGame, PebbleOperation, PebbleRules};
-#[cfg(feature = "bytecast")]
-pub use manager::BytecastSerializer;
-#[cfg(feature = "cold-buffer-std")]
+#[cfg(debug_assertions)]
+pub use manager::DebugCold;
+#[cfg(feature = "std")]
 pub use manager::ParallelCold;
-#[cfg(feature = "cold-buffer")]
 pub use manager::RingCold;
 pub use manager::{
-    BranchError, BranchId, BranchInfo, BuilderError, CapacityGuard, CheckpointRef,
-    CheckpointSerializer, Checkpointable, ColdTier, DirectStorage, DirectStorageError,
-    ErasedPebbleManagerError, HEAD, Manifest, ManifestEntry, NoWarm, PebbleManager,
-    PebbleManagerBuilder, PebbleManagerError, PebbleStats, RecoverableColdTier, Result,
-    TheoreticalValidation, VerificationResult, WarmCache, WarmTier,
+    BranchError, BranchId, BranchInfo, CapacityGuard, CheckpointRef, Checkpointable, ColdTier,
+    DirectStorage, DirectStorageError, ErasedPebbleManagerError, HEAD, Manifest, ManifestEntry,
+    Missing, NoWarm, PebbleBuilder, PebbleManager, PebbleManagerError, PebbleStats,
+    RecoverableColdTier, Result, TheoreticalValidation, VerificationResult, WarmCache, WarmTier,
 };
+#[cfg(feature = "derive")]
+pub use pebble_macros::Checkpoint;
+#[cfg(all(debug_assertions, feature = "std"))]
+pub use storage::DebugFileStorage;
 pub use storage::{
     CheckpointLoader, CheckpointMetadata, InMemoryStorage, IntegrityError, IntegrityErrorKind,
-    RecoverableStorage, RecoveryMode, RecoveryResult, SessionId, StorageError, crc32,
+    RecoverableStorage, RecoveryMode, RecoveryResult, SessionId, StorageError,
+};
+
+#[cfg(feature = "facet")]
+pub use bytecast::BytecastFacet;
+#[cfg(feature = "rkyv")]
+pub use bytecast::BytecastRkyv;
+#[cfg(feature = "serde")]
+pub use bytecast::BytecastSerde;
+pub use bytecast::{
+    ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes, ToBytesExt, ViewBytes,
 };
 
 pub use spout::Spout;
 pub use strategy::{DAGPriorityMode, DAGStrategy, Strategy, TreeStrategy};
 
-/// Integer square root (floor).
-#[must_use]
-#[inline]
-pub const fn isqrt(n: u64) -> u64 {
-    n.isqrt()
-}
-
-/// Optimal checkpoint interval for T events (returns sqrt(T), minimum 1).
-#[must_use]
-#[inline]
-pub const fn checkpoint_interval(expected_events: u64) -> u64 {
-    let sqrt = isqrt(expected_events);
-    if sqrt == 0 { 1 } else { sqrt }
-}
-
 /// Prelude for convenient imports.
 pub mod prelude {
     pub use crate::{
-        BranchError, BranchId, BranchInfo, BuilderError, CapacityGuard, CheckpointLoader,
-        CheckpointRef, CheckpointSerializer, Checkpointable, ColdTier, DirectStorage,
-        ErasedPebbleManagerError, HEAD, HashMap, InMemoryStorage, Manifest, ManifestEntry, NoWarm,
-        PebbleManager, PebbleManagerBuilder, PebbleManagerError, RecoverableColdTier, Result,
-        Spout, Strategy, WarmTier, checkpoint_interval, isqrt,
+        BranchError, BranchId, BranchInfo, CapacityGuard, CheckpointLoader, CheckpointRef,
+        Checkpointable, ColdTier, DirectStorage, ErasedPebbleManagerError, HEAD, HashMap,
+        InMemoryStorage, Manifest, ManifestEntry, NoWarm, PebbleBuilder, PebbleManager,
+        PebbleManagerError, RecoverableColdTier, Result, Spout, Strategy, WarmTier,
     };
 }

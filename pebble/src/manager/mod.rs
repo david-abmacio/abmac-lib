@@ -13,26 +13,24 @@ mod pebble_manager;
 mod rebuild;
 mod recovery;
 mod safety;
-mod serializers;
 mod stats;
 mod traits;
 mod verify;
 pub mod warm;
 
 pub use branch::{BranchError, BranchId, BranchInfo, HEAD};
-pub use builder::PebbleManagerBuilder;
-#[cfg(feature = "cold-buffer-std")]
+pub use builder::{Missing, PebbleBuilder};
+#[cfg(debug_assertions)]
+pub use cold::DebugCold;
+#[cfg(feature = "std")]
 pub use cold::ParallelCold;
-#[cfg(feature = "cold-buffer")]
 pub use cold::RingCold;
 pub use cold::{ColdTier, DirectStorage, DirectStorageError, RecoverableColdTier};
-pub use error::{BuilderError, ErasedPebbleManagerError, PebbleManagerError, Result};
+pub use error::{ErasedPebbleManagerError, PebbleManagerError, Result};
 pub use manifest::{Manifest, ManifestEntry};
 pub use pebble_manager::PebbleManager;
 pub use safety::{CapacityGuard, CheckpointRef};
-#[cfg(feature = "bytecast")]
-pub use serializers::BytecastSerializer;
 pub use stats::{PebbleStats, TheoreticalValidation};
-pub use traits::{CheckpointSerializer, Checkpointable};
+pub use traits::Checkpointable;
 pub use verify::VerificationResult;
 pub use warm::{NoWarm, WarmCache, WarmTier};

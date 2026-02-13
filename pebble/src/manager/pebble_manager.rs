@@ -71,15 +71,8 @@ where
     W: WarmTier<T>,
     S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    /// Create a builder with sensible defaults.
-    ///
-    /// See [`PebbleManagerBuilder`] for details.
-    pub fn builder() -> super::builder::PebbleManagerBuilder {
-        super::builder::PebbleManagerBuilder::new()
-    }
-
     /// Create a new PebbleManager.
-    pub fn new(
+    pub(crate) fn new(
         cold: C,
         warm: W,
         manifest: Manifest<T::Id, S>,

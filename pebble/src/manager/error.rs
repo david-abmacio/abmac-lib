@@ -1,5 +1,3 @@
 //! Re-exports from [`crate::errors::manager`].
 
-pub use crate::errors::manager::{
-    BuilderError, ErasedPebbleManagerError, PebbleManagerError, Result,
-};
+pub use crate::errors::manager::{ErasedPebbleManagerError, PebbleManagerError, Result};

@@ -8,6 +8,9 @@ version = "0.1.0"
 dependencies = [
  "bytecast",
  "bytecast-macros",
+ "hashbrown 0.15.5",
+ "pebble",
+ "pebble-macros",
 ]
 
 [[package]]
@@ -83,6 +86,14 @@ name = "bytecast-macros"
 version = "1.0.0"
 dependencies = [
  "bytecast",
+ "bytecast-macros-impl",
+ "syn",
+]
+
+[[package]]
+name = "bytecast-macros-impl"
+version = "1.0.0"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn",
@@ -584,9 +595,22 @@ version = "0.1.0"
 dependencies = [
  "bytecast",
  "hashbrown 0.15.5",
+ "pebble-macros",
+ "serde",
+ "serde_json",
  "spill-ring",
  "spout",
  "verdict",
+]
+
+[[package]]
+name = "pebble-macros"
+version = "0.1.0"
+dependencies = [
+ "bytecast-macros-impl",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

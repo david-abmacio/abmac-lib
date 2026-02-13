@@ -5,73 +5,14 @@ use alloc::vec::Vec;
 
 use spout::DropSpout;
 
-use crate::manager::{
-    BranchError, CheckpointSerializer, Checkpointable, DirectStorage, HEAD, Manifest, NoWarm,
-    PebbleManager,
-};
-use crate::storage::InMemoryStorage;
+use crate::manager::{BranchError, HEAD, Manifest, NoWarm, PebbleManager};
 use crate::strategy::Strategy;
 
-// Reuse the same test fixtures as manager tests.
-
-#[derive(Debug, Clone)]
-struct TestCheckpoint {
-    id: u64,
-    data: alloc::string::String,
-}
-
-impl Checkpointable for TestCheckpoint {
-    type Id = u64;
-    type RebuildError = ();
-
-    fn checkpoint_id(&self) -> Self::Id {
-        self.id
-    }
-
-    fn compute_from_dependencies(
-        base: Self,
-        _deps: &hashbrown::HashMap<Self::Id, &Self>,
-    ) -> core::result::Result<Self, Self::RebuildError> {
-        Ok(base)
-    }
-}
-
-struct TestSerializer;
-impl CheckpointSerializer<TestCheckpoint> for TestSerializer {
-    type Error = &'static str;
-    fn serialize(&self, cp: &TestCheckpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        let mut b = Vec::new();
-        b.extend_from_slice(&cp.id.to_be_bytes());
-        let data_bytes = cp.data.as_bytes();
-        b.extend_from_slice(&(data_bytes.len() as u32).to_be_bytes());
-        b.extend_from_slice(data_bytes);
-        Ok(b)
-    }
-    fn deserialize(&self, b: &[u8]) -> core::result::Result<TestCheckpoint, Self::Error> {
-        if b.len() < 12 {
-            return Err("too short");
-        }
-        let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
-        let data_len = u32::from_be_bytes(b[8..12].try_into().unwrap()) as usize;
-        let data = alloc::string::String::from_utf8(b[12..12 + data_len].to_vec()).unwrap();
-        Ok(TestCheckpoint { id, data })
-    }
-}
-
-fn test_cold() -> DirectStorage<InMemoryStorage<u64, u128, 8>, TestSerializer> {
-    DirectStorage::new(InMemoryStorage::<u64, u128, 8>::new(), TestSerializer)
-}
-
-fn cp(id: u64) -> TestCheckpoint {
-    TestCheckpoint {
-        id,
-        data: alloc::format!("cp-{id}"),
-    }
-}
+use super::fixtures::{TestCheckpoint, cp, test_cold};
 
 #[test]
 fn branching_disabled_by_default() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -86,7 +27,7 @@ fn branching_disabled_by_default() {
 
 #[test]
 fn enable_branching_assigns_existing_to_head() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -110,7 +51,7 @@ fn enable_branching_assigns_existing_to_head() {
 
 #[test]
 fn enable_branching_idempotent() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -125,7 +66,7 @@ fn enable_branching_idempotent() {
 
 #[test]
 fn add_assigns_to_active_branch() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -146,7 +87,7 @@ fn add_assigns_to_active_branch() {
 
 #[test]
 fn fork_creates_branch() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -169,7 +110,7 @@ fn fork_creates_branch() {
 
 #[test]
 fn fork_switches_active_branch() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -190,7 +131,7 @@ fn fork_switches_active_branch() {
 
 #[test]
 fn switch_branch() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -210,7 +151,7 @@ fn switch_branch() {
 
 #[test]
 fn switch_branch_not_found() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -229,7 +170,7 @@ fn switch_branch_not_found() {
 
 #[test]
 fn switch_branch_not_enabled() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -242,7 +183,7 @@ fn switch_branch_not_enabled() {
 
 #[test]
 fn fork_nonexistent_checkpoint() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -257,7 +198,7 @@ fn fork_nonexistent_checkpoint() {
 
 #[test]
 fn branch_lineage() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -279,7 +220,7 @@ fn branch_lineage() {
 
 #[test]
 fn forks_at() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -303,7 +244,7 @@ fn forks_at() {
 
 #[test]
 fn remove_cleans_branch_tracker() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -320,7 +261,7 @@ fn remove_cleans_branch_tracker() {
 
 #[test]
 fn branches_lists_all() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),
@@ -341,7 +282,7 @@ fn branches_lists_all() {
 
 #[test]
 fn duplicate_branch_name_rejected() {
-    let mut mgr = PebbleManager::new(
+    let mut mgr = PebbleManager::<TestCheckpoint, _, _, _>::new(
         test_cold(),
         NoWarm,
         Manifest::new(DropSpout),

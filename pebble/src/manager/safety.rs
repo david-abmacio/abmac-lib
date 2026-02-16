@@ -86,12 +86,7 @@ where
         let state_id = checkpoint.checkpoint_id();
 
         mgr.dag.add_node(state_id, dependencies)?;
-        mgr.red_pebbles.insert(state_id, checkpoint);
-        mgr.checkpoints_added = mgr.checkpoints_added.saturating_add(1);
-        mgr.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        mgr.debug_place_red(state_id);
+        mgr.register_hot(state_id, checkpoint);
 
         Ok(CheckpointRef::new(state_id))
     }

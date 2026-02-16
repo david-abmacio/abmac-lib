@@ -53,11 +53,7 @@ where
 
         for entry in manifest_entries {
             manifest_ids.insert(entry.checkpoint_id);
-            match max_seq {
-                Some(m) if entry.seq > m => max_seq = Some(entry.seq),
-                None => max_seq = Some(entry.seq),
-                _ => {}
-            }
+            max_seq = Some(max_seq.map_or(entry.seq, |m: u64| m.max(entry.seq)));
             entry_count += 1;
         }
 

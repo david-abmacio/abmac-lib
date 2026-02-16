@@ -119,16 +119,7 @@ where
             self.evict_red_pebbles()?;
         }
 
-        // Add to fast memory
-        self.red_pebbles.insert(state_id, checkpoint);
-        self.dirty.insert(state_id);
-        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
-        self.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        self.debug_place_red(state_id);
-
-        self.auto_grow();
+        self.register_hot(state_id, checkpoint);
 
         Ok(())
     }
@@ -155,16 +146,7 @@ where
         // Add to DAG (validates dependencies exist)
         self.dag.add_node(state_id, dependencies)?;
 
-        // Add to fast memory
-        self.red_pebbles.insert(state_id, checkpoint);
-        self.dirty.insert(state_id);
-        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
-        self.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        self.debug_place_red(state_id);
-
-        self.auto_grow();
+        self.register_hot(state_id, checkpoint);
 
         Ok(state_id)
     }
@@ -283,11 +265,7 @@ where
         // Already hot — just touch and return.
         if self.red_pebbles.contains_key(&state_id) {
             self.dag.mark_accessed(state_id);
-            return self.red_pebbles.get(&state_id).ok_or_else(|| {
-                PebbleManagerError::InternalInconsistency {
-                    detail: alloc::format!("load: lost {:?} after contains_key", state_id),
-                }
-            });
+            return self.expect_hot(state_id);
         }
 
         // Warm tier: promote from warm cache (no deserialization).
@@ -301,11 +279,7 @@ where
             #[cfg(debug_assertions)]
             self.debug_place_red(state_id);
 
-            return self.red_pebbles.get(&state_id).ok_or_else(|| {
-                PebbleManagerError::InternalInconsistency {
-                    detail: alloc::format!("load: lost {:?} after warm insert", state_id),
-                }
-            });
+            return self.expect_hot(state_id);
         }
 
         // Cold tier: load from storage.
@@ -313,7 +287,6 @@ where
             return Err(PebbleManagerError::NeverAdded { state_id });
         }
 
-        // Flush buffered writes so the item is loadable from storage.
         self.cold
             .flush()
             .map_err(|e| PebbleManagerError::FlushFailed { source: e })?;
@@ -341,10 +314,15 @@ where
             self.debug_validate();
         }
 
+        self.expect_hot(state_id)
+    }
+
+    /// Get a reference to a checkpoint that must be in red_pebbles.
+    fn expect_hot(&self, state_id: T::Id) -> Result<&T, T::Id, C::Error> {
         self.red_pebbles
             .get(&state_id)
             .ok_or_else(|| PebbleManagerError::InternalInconsistency {
-                detail: alloc::format!("load: lost {:?} after cold insert", state_id),
+                detail: alloc::format!("load: {:?} not in red_pebbles after insert", state_id),
             })
     }
 
@@ -485,29 +463,17 @@ where
         for i in 0..pending.len() {
             let (id, ref checkpoint) = pending[i];
 
-            // Write-ahead: record eviction in manifest BEFORE cold store.
-            let deps = self
-                .dag
-                .get_node(id)
-                .map(|n| n.dependencies())
-                .unwrap_or(&[]);
-            self.manifest.record(id, deps)?;
-
-            if let Err(e) = self.cold.store(id, checkpoint) {
+            if let Err(e) = self.persist_to_cold(id, checkpoint) {
                 // Re-insert the remaining (unstored) items back into warm.
                 // Safe: warm was fully drained above, so re-inserting the
                 // remaining items cannot exceed its capacity.
                 for (remaining_id, remaining) in pending.drain(i..) {
                     self.warm.insert(remaining_id, remaining);
                 }
-                return Err(PebbleManagerError::Serialization {
-                    state_id: id,
-                    source: e,
-                });
+                return Err(e);
             }
             self.blue_pebbles.insert(id);
             self.dirty.remove(&id);
-            self.io_operations = self.io_operations.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.game.place_blue(id);
@@ -519,6 +485,8 @@ where
         // in stats — recovery uses iter_metadata(), not blue_pebbles.
         let dirty_ids: Vec<T::Id> = self.dirty.drain().collect();
         for id in dirty_ids {
+            // Cannot use persist_to_cold here: red_pebbles borrow would
+            // conflict with &mut self. Manifest + store are called inline.
             let Some(checkpoint) = self.red_pebbles.get(&id) else {
                 continue;
             };
@@ -631,6 +599,43 @@ where
     }
 
     // --- Internal ---
+
+    /// Write-ahead record + cold store + I/O counter. Returns the cold
+    /// store error on failure so callers can handle rollback.
+    pub(super) fn persist_to_cold(
+        &mut self,
+        id: T::Id,
+        checkpoint: &T,
+    ) -> Result<(), T::Id, C::Error> {
+        let deps = self
+            .dag
+            .get_node(id)
+            .map(|n| n.dependencies())
+            .unwrap_or(&[]);
+        self.manifest.record(id, deps)?;
+        self.cold
+            .store(id, checkpoint)
+            .map_err(|e| PebbleManagerError::Serialization {
+                state_id: id,
+                source: e,
+            })?;
+        self.io_operations = self.io_operations.saturating_add(1);
+        Ok(())
+    }
+
+    /// Insert a checkpoint into the hot tier with all bookkeeping:
+    /// red_pebbles, dirty set, counter, branch tracking, debug game, auto-grow.
+    pub(super) fn register_hot(&mut self, state_id: T::Id, checkpoint: T) {
+        self.red_pebbles.insert(state_id, checkpoint);
+        self.dirty.insert(state_id);
+        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
+        self.track_new_checkpoint(state_id);
+
+        #[cfg(debug_assertions)]
+        self.debug_place_red(state_id);
+
+        self.auto_grow();
+    }
 
     /// Assign a checkpoint to the active branch and update branch head.
     pub(super) fn track_new_checkpoint(&mut self, state_id: T::Id) {

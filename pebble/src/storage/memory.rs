@@ -57,10 +57,10 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
     }
 
     pub fn remove(&mut self, state_id: CId) -> bool {
-        // Bitwise OR: both removes must execute (|| would short-circuit).
+        // Both removes execute before combining results.
         let data = self.data.remove(&state_id).is_some();
         let meta = self.metadata.remove(&state_id).is_some();
-        data || meta
+        data | meta
     }
 }
 

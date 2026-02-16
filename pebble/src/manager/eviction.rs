@@ -68,15 +68,7 @@ where
             #[cfg(debug_assertions)]
             self.game.place_blue(overflow_id);
 
-            // Write-ahead: record eviction in manifest BEFORE cold store.
-            let deps = self
-                .dag
-                .get_node(overflow_id)
-                .map(|n| n.dependencies())
-                .unwrap_or(&[]);
-            self.manifest.record(overflow_id, deps)?;
-
-            if let Err(e) = self.cold.store(overflow_id, &overflow) {
+            if let Err(e) = self.persist_to_cold(overflow_id, &overflow) {
                 // Cold store failed — undo everything so no data is lost.
                 // Remove state_id from warm and put overflow back in its place.
                 let recovered = self.warm.remove(state_id);
@@ -95,14 +87,10 @@ where
                     }
                 }
 
-                return Err(PebbleManagerError::Serialization {
-                    state_id: overflow_id,
-                    source: e,
-                });
+                return Err(e);
             }
             self.blue_pebbles.insert(overflow_id);
             self.dirty.remove(&overflow_id);
-            self.io_operations = self.io_operations.saturating_add(1);
         }
         Ok(())
     }

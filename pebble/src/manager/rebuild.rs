@@ -35,11 +35,10 @@ where
     #[must_use = "this returns a Result that may indicate an error"]
     pub fn rebuild(&mut self, state_id: T::Id) -> Result<T, T::Id, C::Error> {
         // Warm tier: promote to red_pebbles before rebuild.
-        if let Some(checkpoint) = self.warm.get(state_id).cloned() {
+        if let Some(checkpoint) = self.warm.remove(state_id) {
             if self.red_pebbles.len() >= self.hot_capacity {
                 self.evict_red_pebbles()?;
             }
-            self.warm.remove(state_id);
             self.red_pebbles.insert(state_id, checkpoint);
 
             #[cfg(debug_assertions)]

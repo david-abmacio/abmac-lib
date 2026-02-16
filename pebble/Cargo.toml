@@ -12,7 +12,6 @@ std = ["spill-ring/std"]
 serde = ["bytecast/serde"]
 facet = ["bytecast/facet"]
 rkyv = ["bytecast/rkyv"]
-verdict = []
 
 [dependencies]
 bytecast = { path = "../bytecast", default-features = false, features = ["alloc", "derive"] }

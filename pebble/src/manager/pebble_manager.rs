@@ -562,6 +562,12 @@ where
         &mut self.cold
     }
 
+    /// Borrow the manifest.
+    #[inline]
+    pub fn manifest(&self) -> &Manifest<T::Id, S> {
+        &self.manifest
+    }
+
     /// Remove a checkpoint. Returns `true` if found and removed.
     pub fn remove(&mut self, state_id: T::Id) -> bool {
         // Remove from whichever tier holds it (hot, warm, or cold).
@@ -576,6 +582,12 @@ where
         self.dag.remove_node(state_id);
         if let Some(ref mut tracker) = self.branches {
             tracker.remove_checkpoint(state_id);
+        }
+
+        // Tombstone: mark cold removals in the manifest so a future
+        // compaction pass can clean up the serialized data.
+        if was_in_cold {
+            self.manifest.record_tombstone(state_id);
         }
 
         // The game tracks hot and cold tiers (not warm).

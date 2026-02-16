@@ -1,31 +1,40 @@
-//! WAL manifest for tracking checkpoint evictions to cold storage.
+//! Append-only WAL manifest for tracking checkpoint lifecycle.
 //!
-//! The manifest is a SpillRing that records every eviction with
-//! dependency metadata. Together, hot + manifest = complete picture:
-//! every checkpoint is either in hot or has a manifest entry. A
-//! checkpoint in neither was lost.
+//! The manifest is a SpillRing that records evictions to cold storage
+//! and tombstones for removed checkpoints. Together, hot + manifest =
+//! complete picture: replay the log to determine the live set.
 //!
-//! Write-ahead: manifest entries are written BEFORE `cold.store()`.
+//! The manifest is never mutated — tombstones are appended, never
+//! deleted. A future compaction pass can replay the log to identify
+//! garbage in cold storage.
+//!
+//! Write-ahead: eviction entries are written BEFORE `cold.store()`.
 
 use core::convert::Infallible;
 
 use spill_ring::SpillRing;
 use spout::Spout;
 
-/// A WAL entry recording a checkpoint eviction to cold storage.
+/// A WAL entry recording a checkpoint eviction or removal.
 ///
-/// Carries dependencies so the full DAG can be reconstructed from
-/// hot + manifest without scanning cold storage metadata.
+/// Eviction entries carry dependencies so the full DAG can be
+/// reconstructed from hot + manifest without scanning cold storage
+/// metadata. Tombstone entries mark a checkpoint as removed — the
+/// serialized data may still exist in cold storage until a
+/// compaction pass cleans it up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ManifestEntry<CId: Copy + Default, const MAX_DEPS: usize = 8> {
-    /// The checkpoint that was evicted to cold storage.
+    /// The checkpoint this entry refers to.
     pub checkpoint_id: CId,
     /// Dependencies at eviction time (snapshot from the DAG).
+    /// Zeroed for tombstone entries.
     pub dependencies: [CId; MAX_DEPS],
     /// Number of valid entries in `dependencies`.
     pub dep_count: u8,
     /// Monotonically increasing sequence number. Gaps indicate lost entries.
     pub seq: u64,
+    /// `true` if this entry marks a removal (tombstone), `false` for eviction.
+    pub tombstone: bool,
 }
 
 /// SpillRing-backed WAL manifest.
@@ -73,6 +82,23 @@ where
             dependencies: deps,
             dep_count: dep_count as u8,
             seq: self.seq,
+            tombstone: false,
+        };
+        self.seq += 1;
+        self.ring.push_mut(entry);
+    }
+
+    /// Record that a cold checkpoint was removed.
+    ///
+    /// Appends a tombstone entry. The serialized data remains in cold
+    /// storage until a compaction pass; this entry marks it as garbage.
+    pub(crate) fn record_tombstone(&mut self, checkpoint_id: CId) {
+        let entry = ManifestEntry {
+            checkpoint_id,
+            dependencies: [CId::default(); MAX_DEPS],
+            dep_count: 0,
+            seq: self.seq,
+            tombstone: true,
         };
         self.seq += 1;
         self.ring.push_mut(entry);

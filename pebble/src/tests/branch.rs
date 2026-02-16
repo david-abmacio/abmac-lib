@@ -18,6 +18,7 @@ fn branching_disabled_by_default() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.add(cp(1), &[]).unwrap();
     assert!(mgr.active_branch().is_none());
@@ -33,6 +34,7 @@ fn enable_branching_assigns_existing_to_head() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.add(cp(1), &[]).unwrap();
     mgr.add(cp(2), &[]).unwrap();
@@ -57,6 +59,7 @@ fn enable_branching_idempotent() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -72,6 +75,7 @@ fn add_assigns_to_active_branch() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
 
@@ -93,6 +97,7 @@ fn fork_creates_branch() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -116,6 +121,7 @@ fn fork_switches_active_branch() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -137,6 +143,7 @@ fn switch_branch() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -157,6 +164,7 @@ fn switch_branch_not_found() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
 
@@ -176,6 +184,7 @@ fn switch_branch_not_enabled() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     let result = mgr.switch_branch(HEAD);
     assert_eq!(result, Err(BranchError::BranchingNotEnabled));
@@ -189,6 +198,7 @@ fn fork_nonexistent_checkpoint() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
 
@@ -204,6 +214,7 @@ fn branch_lineage() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -226,6 +237,7 @@ fn forks_at() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -250,6 +262,7 @@ fn remove_cleans_branch_tracker() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -267,6 +280,7 @@ fn branches_lists_all() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();
@@ -288,6 +302,7 @@ fn duplicate_branch_name_rejected() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
     mgr.enable_branching();
     mgr.add(cp(1), &[]).unwrap();

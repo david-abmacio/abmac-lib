@@ -17,6 +17,7 @@ fn test_add_ref_returns_token() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let token = mgr.add_ref(cp(1), &[]).unwrap();
     assert_eq!(token.id(), 1);
@@ -31,6 +32,7 @@ fn test_insert_ref_returns_token() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let token = mgr.insert_ref(&[], || cp(42)).unwrap();
     assert_eq!(token.id(), 42);
@@ -45,6 +47,7 @@ fn test_locate_found() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     mgr.add(cp(10), &[]).unwrap();
     let token = mgr.locate(10);
@@ -60,6 +63,7 @@ fn test_locate_not_found() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     assert!(mgr.locate(999).is_none());
 }
@@ -72,6 +76,7 @@ fn test_load_ref() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let token = mgr.add_ref(cp(5), &[]).unwrap();
     let loaded = mgr.load_ref(token).unwrap();
@@ -86,6 +91,7 @@ fn test_rebuild_ref() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let token = mgr.add_ref(cp(7), &[]).unwrap();
     let rebuilt = mgr.rebuild_ref(token).unwrap();
@@ -100,6 +106,7 @@ fn test_stale_token() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let token = mgr.add_ref(cp(3), &[]).unwrap();
     mgr.remove(3);
@@ -120,6 +127,7 @@ fn test_ensure_capacity_when_not_full() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     mgr.add(cp(1), &[]).unwrap();
     // Hot tier has space — no eviction needed
@@ -138,6 +146,7 @@ fn test_ensure_capacity_evicts_when_full() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
     mgr.add(cp(1), &[]).unwrap();
     mgr.add(cp(2), &[]).unwrap();
@@ -159,6 +168,7 @@ fn test_guard_insert() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
     let guard = mgr.ensure_capacity().unwrap();
     let token = guard.insert(&[], || cp(77)).unwrap();

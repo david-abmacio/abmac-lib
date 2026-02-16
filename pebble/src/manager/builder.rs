@@ -66,6 +66,7 @@ pub struct PebbleBuilder<C = Missing, W = Missing, L = Missing> {
     log: L,
     strategy: Strategy,
     hot_capacity: usize,
+    auto_resize: bool,
 }
 
 // ── Constructor ─────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ impl PebbleBuilder {
             log: Missing,
             strategy: Strategy::default(),
             hot_capacity: DEFAULT_HOT_CAPACITY,
+            auto_resize: true,
         }
     }
 }
@@ -100,6 +102,7 @@ impl<W, L> PebbleBuilder<Missing, W, L> {
             log: self.log,
             strategy: self.strategy,
             hot_capacity: self.hot_capacity,
+            auto_resize: self.auto_resize,
         }
     }
 }
@@ -118,6 +121,7 @@ impl<C, L> PebbleBuilder<C, Missing, L> {
             log: self.log,
             strategy: self.strategy,
             hot_capacity: self.hot_capacity,
+            auto_resize: self.auto_resize,
         }
     }
 }
@@ -137,6 +141,7 @@ impl<C, W> PebbleBuilder<C, W, Missing> {
             log: spout,
             strategy: self.strategy,
             hot_capacity: self.hot_capacity,
+            auto_resize: self.auto_resize,
         }
     }
 }
@@ -165,6 +170,18 @@ impl<C, W, L> PebbleBuilder<C, W, L> {
         self.hot_capacity = n.isqrt().max(1);
         self
     }
+
+    /// Disable automatic hot tier growth.
+    ///
+    /// By default, `hot_capacity` is increased to `sqrt(T)` whenever
+    /// the total checkpoint count crosses a perfect-square boundary.
+    /// Call this to keep `hot_capacity` fixed at the value set by
+    /// [`hot_capacity()`](Self::hot_capacity) or
+    /// [`hint_total_checkpoints()`](Self::hint_total_checkpoints).
+    pub fn manual_resize(mut self) -> Self {
+        self.auto_resize = false;
+        self
+    }
 }
 
 // ── Build ───────────────────────────────────────────────────────────────
@@ -190,6 +207,7 @@ impl<C, W, L> PebbleBuilder<C, W, L> {
             manifest,
             self.strategy,
             self.hot_capacity.max(1),
+            self.auto_resize,
         )
     }
 
@@ -219,6 +237,7 @@ impl<C, W, L> PebbleBuilder<C, W, L> {
             manifest,
             self.strategy,
             self.hot_capacity.max(1),
+            self.auto_resize,
         )
     }
 }

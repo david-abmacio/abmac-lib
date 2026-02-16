@@ -20,6 +20,7 @@ fn test_basic_add_and_get() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     let cp = TestCheckpoint {
@@ -40,6 +41,7 @@ fn test_insert_zero_copy() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     // Use insert with constructor closure
@@ -63,6 +65,7 @@ fn test_insert_with_dependencies() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     // Add parent checkpoint
@@ -97,6 +100,7 @@ fn test_eviction() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
 
     // Fill up fast memory
@@ -125,6 +129,7 @@ fn test_load_from_storage() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
 
     // Add checkpoints
@@ -162,6 +167,7 @@ fn test_compress() {
         Manifest::new(DropSpout),
         Strategy::default(),
         100,
+        false,
     );
 
     // Add many checkpoints
@@ -198,6 +204,7 @@ fn test_stats() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     for i in 0..5 {
@@ -225,6 +232,7 @@ fn test_rebuild_simple() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
 
     // Add a chain of checkpoints: 0 -> 1 -> 2 -> 3
@@ -260,6 +268,7 @@ fn test_rebuild_from_hot() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     let cp = TestCheckpoint {
@@ -282,6 +291,7 @@ fn test_rebuild_not_found() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     // Rebuild non-existent checkpoint should fail
@@ -301,6 +311,7 @@ fn test_theoretical_validation_space_bound() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     for i in 0..100 {
@@ -339,6 +350,7 @@ fn test_theoretical_validation_space_bound_exceeded() {
         Manifest::new(DropSpout),
         Strategy::default(),
         100,
+        false,
     );
 
     for i in 0..16 {
@@ -384,6 +396,7 @@ fn test_tree_io_bound_end_to_end() {
         Manifest::new(DropSpout),
         Strategy::Tree(TreeStrategy::new()),
         hot_capacity,
+        false,
     );
 
     // Build balanced binary tree: node i has children 2i+1 and 2i+2.
@@ -479,6 +492,7 @@ fn test_dag_io_bound_end_to_end() {
         Manifest::new(DropSpout),
         Strategy::DAG(DAGStrategy::default()),
         hot_capacity,
+        false,
     );
 
     // Build layered DAG.
@@ -567,6 +581,7 @@ fn test_theoretical_validation_io_bound() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     );
 
     for i in 0..20 {
@@ -618,6 +633,7 @@ fn test_recover_cold_start() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     )
     .unwrap();
 
@@ -638,6 +654,7 @@ fn test_recover_warm_restart() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
 
     // Add checkpoints - with small hot_capacity, some will go to storage
@@ -671,6 +688,7 @@ fn test_recover_warm_restart() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     )
     .unwrap();
 
@@ -691,6 +709,7 @@ fn test_recover_with_dependencies() {
         Manifest::new(DropSpout),
         Strategy::default(),
         2,
+        false,
     );
 
     // Add a chain: 0 -> 1 -> 2
@@ -730,6 +749,7 @@ fn test_recover_with_dependencies() {
         Manifest::new(DropSpout),
         Strategy::default(),
         10,
+        false,
     )
     .unwrap();
 
@@ -763,6 +783,7 @@ mod cold_buffer {
             Manifest::new(DropSpout),
             Strategy::default(),
             hot_capacity,
+            false,
         )
     }
 
@@ -1188,6 +1209,7 @@ fn test_resize_hot_grow() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
 
     for i in 0..10 {
@@ -1235,6 +1257,7 @@ fn test_resize_hot_shrink() {
         Manifest::new(DropSpout),
         Strategy::default(),
         20,
+        false,
     );
 
     for i in 0..10 {
@@ -1267,6 +1290,7 @@ fn test_resize_hot_clamps_zero() {
         Manifest::new(DropSpout),
         Strategy::default(),
         4,
+        false,
     );
 
     manager
@@ -1293,6 +1317,7 @@ fn test_resize_optimal() {
         Manifest::new(DropSpout),
         Strategy::default(),
         200,
+        false,
     );
 
     // Add 100 checkpoints — all stay hot with capacity 200.
@@ -1319,4 +1344,152 @@ fn test_resize_optimal() {
     );
     manager.flush().unwrap();
     assert_eq!(manager.red_count() + manager.blue_count(), 100);
+}
+
+// Auto-resize
+
+#[test]
+fn test_auto_resize_grows_capacity() {
+    // Start with hot_capacity=1 and auto_resize=true.
+    // After adding 100 checkpoints, hot_capacity should grow to sqrt(100)=10.
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        1,
+        true,
+    );
+
+    for i in 0..100 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    // hot_capacity should have grown to sqrt(100) = 10
+    let stats = manager.stats();
+    assert!(
+        stats.red_pebble_count() <= 10,
+        "red count {} should be <= sqrt(100)=10",
+        stats.red_pebble_count(),
+    );
+    // More items stay hot than with a fixed capacity of 1
+    assert!(
+        stats.red_pebble_count() > 1,
+        "auto_resize should have grown capacity beyond initial 1, got {}",
+        stats.red_pebble_count(),
+    );
+}
+
+#[test]
+fn test_manual_resize_keeps_fixed_capacity() {
+    // With manual_resize, hot_capacity stays fixed.
+    use crate::manager::PebbleBuilder;
+
+    let mut manager = PebbleBuilder::new()
+        .cold(test_cold())
+        .warm(NoWarm)
+        .log(DropSpout)
+        .hot_capacity(2)
+        .manual_resize()
+        .build::<TestCheckpoint>();
+
+    for i in 0..100 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    // hot_capacity stayed at 2, so red count should be <= 2
+    assert!(
+        manager.red_count() <= 2,
+        "with manual_resize, red count {} should be <= fixed capacity 2",
+        manager.red_count(),
+    );
+}
+
+#[test]
+fn test_auto_resize_never_shrinks() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        1,
+        true,
+    );
+
+    // Add 100 checkpoints to grow capacity to sqrt(100)=10
+    for i in 0..100 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    let red_before_remove = manager.red_count();
+
+    // Remove many checkpoints — capacity should NOT shrink
+    for i in 0..80 {
+        manager.remove(i);
+    }
+
+    // Still have the same red count (minus any that were in hot and removed)
+    // The key invariant: capacity didn't shrink, so remaining hot items stay hot
+    assert!(
+        manager.red_count() <= red_before_remove,
+        "red count should not have increased after removes",
+    );
+    // Total is now 20
+    assert_eq!(manager.len(), 20);
+}
+
+#[test]
+fn test_auto_resize_builder_default() {
+    use crate::manager::PebbleBuilder;
+
+    // auto_resize is on by default — no method call needed
+    let mut manager = PebbleBuilder::new()
+        .cold(test_cold())
+        .warm(NoWarm)
+        .log(DropSpout)
+        .hot_capacity(1)
+        .build::<TestCheckpoint>();
+
+    for i in 0..100 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    // Default auto_resize should grow capacity beyond initial 1
+    assert!(
+        manager.red_count() > 1,
+        "default auto_resize should grow capacity, got red_count={}",
+        manager.red_count(),
+    );
 }

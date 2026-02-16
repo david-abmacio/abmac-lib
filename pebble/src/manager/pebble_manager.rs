@@ -59,6 +59,7 @@ where
     pub(super) manifest: Manifest<T::Id, S>,
     pub(super) checkpoints_added: u64,
     pub(super) io_operations: u64,
+    pub(super) auto_resize: bool,
     pub(super) branches: Option<super::branch::BranchTracker<T::Id>>,
     #[cfg(debug_assertions)]
     pub(super) game: crate::game::PebbleGame<T::Id>,
@@ -78,6 +79,7 @@ where
         manifest: Manifest<T::Id, S>,
         strategy: Strategy,
         hot_capacity: usize,
+        auto_resize: bool,
     ) -> Self {
         debug_assert!(hot_capacity >= 1, "hot_capacity must be at least 1");
         let hot_capacity = hot_capacity.max(1);
@@ -92,6 +94,7 @@ where
             manifest,
             checkpoints_added: 0,
             io_operations: 0,
+            auto_resize,
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),
@@ -122,6 +125,8 @@ where
 
         #[cfg(debug_assertions)]
         self.debug_place_red(state_id);
+
+        self.auto_grow();
 
         Ok(())
     }
@@ -155,6 +160,8 @@ where
 
         #[cfg(debug_assertions)]
         self.debug_place_red(state_id);
+
+        self.auto_grow();
 
         Ok(state_id)
     }
@@ -599,6 +606,26 @@ where
     pub(super) fn debug_place_red(&mut self, state_id: T::Id) {
         self.game.place_red(state_id);
         self.debug_validate();
+    }
+
+    /// If auto_resize is enabled and sqrt(T) has grown past hot_capacity, grow it.
+    fn auto_grow(&mut self) {
+        if self.auto_resize {
+            let new_optimal = self.len().isqrt().max(1);
+            if new_optimal > self.hot_capacity {
+                self.hot_capacity = new_optimal;
+                #[cfg(debug_assertions)]
+                {
+                    self.game = crate::game::PebbleGame::new(self.hot_capacity);
+                    for &id in self.red_pebbles.keys() {
+                        self.game.place_red(id);
+                    }
+                    for &id in &self.blue_pebbles {
+                        self.game.place_blue(id);
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn evict_red_pebbles(&mut self) -> Result<usize, T::Id, C::Error> {

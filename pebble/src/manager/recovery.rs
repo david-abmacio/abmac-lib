@@ -31,6 +31,7 @@ where
         manifest: Manifest<T::Id, S>,
         strategy: Strategy,
         hot_capacity: usize,
+        auto_resize: bool,
     ) -> Result<(Self, RecoveryResult), T::Id, C::Error> {
         let mut manager = Self {
             hot_capacity,
@@ -43,6 +44,7 @@ where
             manifest,
             checkpoints_added: 0,
             io_operations: 0,
+            auto_resize,
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),

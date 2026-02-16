@@ -41,6 +41,7 @@
 #![no_std]
 
 extern crate alloc;
+extern crate self as pebble;
 
 pub(crate) mod dag;
 pub(crate) mod errors;

@@ -6,7 +6,7 @@ description = "O(√T) checkpoint management using the Williams pebble game algo
 license = "MIT OR Apache-2.0"
 
 [features]
-default = []
+default = ["derive"]
 derive = ["dep:pebble-macros"]
 std = ["spill-ring/std"]
 serde = ["bytecast/serde"]

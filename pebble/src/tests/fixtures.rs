@@ -1,29 +1,14 @@
 //! Shared test fixtures for PebbleManager tests.
 
-use crate::manager::{Checkpointable, DirectStorage};
+use crate::manager::DirectStorage;
 use crate::storage::InMemoryStorage;
 
 /// Checkpoint type used across manager, branch, and safety tests.
-#[derive(Debug, Clone, bytecast::DeriveToBytes, bytecast::DeriveFromBytes)]
+#[derive(Debug, Clone, crate::Checkpoint)]
 pub struct TestCheckpoint {
+    #[checkpoint(id)]
     pub id: u64,
     pub data: alloc::string::String,
-}
-
-impl Checkpointable for TestCheckpoint {
-    type Id = u64;
-    type RebuildError = ();
-
-    fn checkpoint_id(&self) -> Self::Id {
-        self.id
-    }
-
-    fn compute_from_dependencies(
-        base: Self,
-        _deps: &hashbrown::HashMap<Self::Id, &Self>,
-    ) -> core::result::Result<Self, Self::RebuildError> {
-        Ok(base)
-    }
 }
 
 /// Cold tier type used in tests.

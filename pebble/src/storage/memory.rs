@@ -11,7 +11,7 @@ use super::{
 };
 
 /// In-memory storage for testing. Not thread-safe.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InMemoryStorage<
     CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,

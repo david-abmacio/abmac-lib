@@ -19,3 +19,6 @@ mod recovery;
 mod resize;
 mod theory;
 mod tombstone;
+
+#[cfg(feature = "std")]
+mod parallel;

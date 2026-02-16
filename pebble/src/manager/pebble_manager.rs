@@ -488,7 +488,7 @@ where
                 .get_node(id)
                 .map(|n| n.dependencies())
                 .unwrap_or(&[]);
-            self.manifest.record(id, deps);
+            self.manifest.record(id, deps)?;
 
             if let Err(e) = self.cold.store(id, checkpoint) {
                 // Re-insert the remaining (unstored) items back into warm.
@@ -690,7 +690,7 @@ where
                 .get_node(overflow_id)
                 .map(|n| n.dependencies())
                 .unwrap_or(&[]);
-            self.manifest.record(overflow_id, deps);
+            self.manifest.record(overflow_id, deps)?;
 
             if let Err(e) = self.cold.store(overflow_id, &overflow) {
                 // Cold store failed — undo everything so no data is lost.

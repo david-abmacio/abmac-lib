@@ -72,20 +72,41 @@ where
     /// Record a checkpoint eviction to cold storage.
     ///
     /// Called BEFORE `cold.store()` — write-ahead semantics.
-    pub(crate) fn record(&mut self, checkpoint_id: CId, dependencies: &[CId]) {
+    ///
+    /// Returns [`StorageError::TooManyDependencies`] if
+    /// `dependencies.len()` exceeds `MAX_DEPS`.
+    pub(crate) fn record(
+        &mut self,
+        checkpoint_id: CId,
+        dependencies: &[CId],
+    ) -> Result<(), crate::storage::StorageError> {
+        debug_assert!(
+            dependencies.len() <= MAX_DEPS,
+            "manifest record: {} dependencies exceeds MAX_DEPS={}",
+            dependencies.len(),
+            MAX_DEPS,
+        );
+
+        if dependencies.len() > MAX_DEPS {
+            return Err(crate::storage::StorageError::TooManyDependencies {
+                max: MAX_DEPS,
+                count: dependencies.len(),
+            });
+        }
+
         let mut deps = [CId::default(); MAX_DEPS];
-        let dep_count = dependencies.len().min(MAX_DEPS);
-        deps[..dep_count].copy_from_slice(&dependencies[..dep_count]);
+        deps[..dependencies.len()].copy_from_slice(dependencies);
 
         let entry = ManifestEntry {
             checkpoint_id,
             dependencies: deps,
-            dep_count: dep_count as u8,
+            dep_count: dependencies.len() as u8,
             seq: self.seq,
             tombstone: false,
         };
         self.seq += 1;
         self.ring.push_mut(entry);
+        Ok(())
     }
 
     /// Record that a cold checkpoint was removed.

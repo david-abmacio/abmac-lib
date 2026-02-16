@@ -61,6 +61,9 @@ pub trait ColdTier<T: Checkpointable> {
     /// [`load`](Self::load) and [`contains`](Self::contains).
     fn flush(&mut self) -> Result<(), Self::Error>;
 
+    /// Remove a checkpoint from storage. Returns `true` if it existed.
+    fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error>;
+
     /// Number of items currently buffered (not yet in storage).
     fn buffered_count(&self) -> usize;
 }

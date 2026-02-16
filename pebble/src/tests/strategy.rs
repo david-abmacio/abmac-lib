@@ -24,6 +24,7 @@ fn test_eviction_count() {
 fn test_recommended_memory_size() {
     let stats = DAGStats {
         total_nodes: 1000,
+        edge_count: 1500,
         root_nodes: 1,
         leaf_nodes: 100,
         max_depth: 10,

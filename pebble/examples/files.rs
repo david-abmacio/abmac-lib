@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pebble::{Checkpoint, CheckpointLoader, PebbleBuilder, RingCold, WarmCache};
+use pebble::{Checkpoint, CheckpointLoader, CheckpointRemover, PebbleBuilder, RingCold, WarmCache};
 use spout::Spout;
 
 #[derive(Clone, Debug, Checkpoint)]
@@ -62,6 +62,16 @@ impl CheckpointLoader<u64> for FileStorage {
 
     fn contains(&self, id: u64) -> bool {
         self.written.contains_key(&id)
+    }
+}
+
+impl CheckpointRemover<u64> for FileStorage {
+    fn remove(&mut self, id: u64) -> bool {
+        if self.written.remove(&id).is_none() {
+            return false;
+        }
+        let _ = fs::remove_file(self.path_for(id));
+        true
     }
 }
 

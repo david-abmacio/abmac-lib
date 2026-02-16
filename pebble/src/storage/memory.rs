@@ -5,7 +5,10 @@ use core::hash::Hash;
 use hashbrown::HashMap;
 use spout::Spout;
 
-use super::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId, StorageError};
+use super::{
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, RecoverableStorage, SessionId,
+    StorageError,
+};
 
 /// In-memory storage for testing. Not thread-safe.
 #[derive(Debug)]
@@ -91,6 +94,14 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
 
     fn contains(&self, state_id: CId) -> bool {
         self.data.contains_key(&state_id)
+    }
+}
+
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    CheckpointRemover<CId> for InMemoryStorage<CId, SId, MAX_DEPS>
+{
+    fn remove(&mut self, state_id: CId) -> bool {
+        self.remove(state_id)
     }
 }
 

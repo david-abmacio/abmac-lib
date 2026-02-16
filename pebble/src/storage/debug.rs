@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 
 use spout::Spout;
 
-use super::{CheckpointLoader, StorageError};
+use super::{CheckpointLoader, CheckpointRemover, StorageError};
 
 /// File-backed storage for debug builds.
 ///
@@ -97,5 +97,15 @@ impl CheckpointLoader<u64> for DebugFileStorage {
 
     fn contains(&self, state_id: u64) -> bool {
         self.written.contains_key(&state_id)
+    }
+}
+
+impl CheckpointRemover<u64> for DebugFileStorage {
+    fn remove(&mut self, state_id: u64) -> bool {
+        if self.written.remove(&state_id).is_none() {
+            return false;
+        }
+        let _ = fs::remove_file(self.path_for(state_id));
+        true
     }
 }

@@ -11,7 +11,9 @@ use spill_ring::SpillRing;
 use spout::Spout;
 
 use crate::manager::traits::Checkpointable;
-use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use crate::storage::{
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, RecoverableStorage, SessionId,
+};
 use bytecast::ByteSerializer;
 
 pub use super::direct::DirectStorageError;
@@ -64,7 +66,9 @@ where
 impl<T, S, const N: usize> ColdTier<T> for RingCold<T::Id, S, N>
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
-    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible> + CheckpointLoader<T::Id>,
+    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
+        + CheckpointLoader<T::Id>
+        + CheckpointRemover<T::Id>,
 {
     type Error = DirectStorageError;
 
@@ -93,6 +97,10 @@ where
         Ok(())
     }
 
+    fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error> {
+        Ok(self.ring.sink_mut().remove(id))
+    }
+
     fn buffered_count(&self) -> usize {
         self.ring.len()
     }
@@ -104,7 +112,8 @@ where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
-        + RecoverableStorage<T::Id, SId, MAX_DEPS>,
+        + RecoverableStorage<T::Id, SId, MAX_DEPS>
+        + CheckpointRemover<T::Id>,
     SId: SessionId,
 {
     type MetadataIter<'a>

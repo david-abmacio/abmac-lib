@@ -74,8 +74,8 @@ pub use pebble_macros::Checkpoint;
 #[cfg(all(debug_assertions, feature = "std"))]
 pub use storage::DebugFileStorage;
 pub use storage::{
-    CheckpointLoader, CheckpointMetadata, InMemoryStorage, IntegrityError, IntegrityErrorKind,
-    RecoverableStorage, RecoveryMode, RecoveryResult, SessionId, StorageError,
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, InMemoryStorage, IntegrityError,
+    IntegrityErrorKind, RecoverableStorage, RecoveryMode, RecoveryResult, SessionId, StorageError,
 };
 
 #[cfg(feature = "facet")]

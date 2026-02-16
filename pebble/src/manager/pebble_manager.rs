@@ -396,11 +396,26 @@ where
         let warm_count = self.warm.len();
         let total_nodes = self.red_pebbles.len() + self.blue_pebbles.len() + warm_count;
 
-        // Lower bound: every node beyond hot_capacity must be written
-        // to storage at least once. This is a true minimum — you cannot
-        // process T nodes through S hot slots without at least T - S
-        // eviction writes.
-        let theoretical_min_io = total_nodes.saturating_sub(self.hot_capacity).max(1) as u64;
+        // I/O lower bound: max of three valid bounds.
+        let dag_stats = self.dag.stats();
+        let s = self.hot_capacity;
+
+        // Counting bound: every node beyond S must be evicted once.
+        let counting = total_nodes.saturating_sub(s);
+
+        // Edge bound (Hong & Kung 1981): (|E| - |V|*S) / S.
+        let v = dag_stats.total_nodes;
+        let e = dag_stats.edge_count;
+        let edge = if e > v * s {
+            (e - v * s).div_ceil(s)
+        } else {
+            0
+        };
+
+        // Depth bound: critical path exceeding hot capacity.
+        let depth = (dag_stats.max_depth + 1).saturating_sub(s);
+
+        let theoretical_min_io = counting.max(edge).max(depth).max(1) as u64;
 
         // Optimal fast memory is O(sqrt(T))
         let optimal_hot = total_nodes.isqrt();
@@ -582,10 +597,12 @@ where
             tracker.remove_checkpoint(state_id);
         }
 
-        // Tombstone: mark cold removals in the manifest so a future
-        // compaction pass can clean up the serialized data.
+        // Write-ahead: record tombstone first, then delete from cold storage.
+        // If we crash between (1) and (2), recovery sees the tombstone and
+        // ignores any stale data still in cold storage.
         if was_in_cold {
             self.manifest.record_tombstone(state_id);
+            let _ = self.cold.remove(state_id);
         }
 
         // The game tracks hot and cold tiers (not warm).

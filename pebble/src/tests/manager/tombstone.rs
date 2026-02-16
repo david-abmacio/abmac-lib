@@ -1,6 +1,7 @@
 //! Tombstone tests for PebbleManager manifest entries.
 
 use super::*;
+use crate::storage::CheckpointLoader;
 use spout::CollectSpout;
 
 #[test]
@@ -44,6 +45,12 @@ fn test_tombstone_recorded_on_cold_remove() {
     let tombstones: alloc::vec::Vec<_> = entries.iter().filter(|e| e.tombstone).collect();
     assert_eq!(tombstones.len(), 1);
     assert_eq!(tombstones[0].checkpoint_id, cold_id);
+
+    // Cold storage should be cleaned up immediately.
+    assert!(
+        !manager.cold().storage().contains(cold_id),
+        "cold storage should no longer contain removed checkpoint"
+    );
 }
 
 #[test]
@@ -128,4 +135,52 @@ fn test_tombstone_sequencing() {
         tombstone.unwrap().seq,
         eviction.unwrap().seq,
     );
+}
+
+#[test]
+fn test_cold_storage_cleaned_on_remove() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(CollectSpout::new()),
+        Strategy::default(),
+        2,
+        false,
+    );
+
+    // Add 4 checkpoints — hot_capacity=2 so at least 2 will be evicted to cold.
+    for i in 0..4 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("d{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    let cold_ids: alloc::vec::Vec<_> = (0..4).filter(|&i| manager.is_in_storage(i)).collect();
+    assert!(!cold_ids.is_empty(), "should have items in cold storage");
+
+    // Verify cold storage contains the data.
+    for &id in &cold_ids {
+        assert!(manager.cold().storage().contains(id));
+    }
+
+    // Remove cold checkpoints and verify storage is cleaned up.
+    for &id in &cold_ids {
+        assert!(manager.remove(id));
+        assert!(
+            !manager.cold().storage().contains(id),
+            "cold storage should not contain {id} after removal"
+        );
+    }
+
+    // Remaining items should still be accessible.
+    let hot_ids: alloc::vec::Vec<_> = (0..4).filter(|i| !cold_ids.contains(i)).collect();
+    for &id in &hot_ids {
+        assert!(manager.is_hot(id));
+    }
 }

@@ -8,7 +8,9 @@ use spout::Spout;
 
 pub use crate::errors::cold::DirectStorageError;
 use crate::manager::traits::Checkpointable;
-use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use crate::storage::{
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, RecoverableStorage, SessionId,
+};
 use bytecast::ByteSerializer;
 
 use super::{ColdTier, RecoverableColdTier};
@@ -73,7 +75,7 @@ impl DirectStorage<crate::storage::InMemoryStorage> {
 impl<T, S> ColdTier<T> for DirectStorage<S>
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
-    S: Spout<(T::Id, Vec<u8>)> + CheckpointLoader<T::Id>,
+    S: Spout<(T::Id, Vec<u8>)> + CheckpointLoader<T::Id> + CheckpointRemover<T::Id>,
 {
     type Error = DirectStorageError;
 
@@ -101,6 +103,10 @@ where
         Ok(())
     }
 
+    fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error> {
+        Ok(self.storage.remove(id))
+    }
+
     fn buffered_count(&self) -> usize {
         0
     }
@@ -110,7 +116,9 @@ impl<T, S, SId, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS> for
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
-    S: Spout<(T::Id, Vec<u8>)> + RecoverableStorage<T::Id, SId, MAX_DEPS>,
+    S: Spout<(T::Id, Vec<u8>)>
+        + RecoverableStorage<T::Id, SId, MAX_DEPS>
+        + CheckpointRemover<T::Id>,
     SId: SessionId,
 {
     type MetadataIter<'a>

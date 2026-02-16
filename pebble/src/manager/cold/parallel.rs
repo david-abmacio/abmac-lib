@@ -15,7 +15,9 @@ use spill_ring::{MpscRing, SpillRing};
 use spout::Spout;
 
 use crate::manager::traits::Checkpointable;
-use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
+use crate::storage::{
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, RecoverableStorage, SessionId,
+};
 use bytecast::ByteSerializer;
 
 pub use super::direct::DirectStorageError;
@@ -138,6 +140,7 @@ where
     T::Id: Send + Sync + 'static,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
         + CheckpointLoader<T::Id>
+        + CheckpointRemover<T::Id>
         + Clone
         + Send
         + 'static,
@@ -182,6 +185,10 @@ where
         Ok(())
     }
 
+    fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error> {
+        Ok(self.storage.remove(id))
+    }
+
     fn buffered_count(&self) -> usize {
         self.pending.len()
     }
@@ -194,6 +201,7 @@ where
     T::Id: Hash + Send + Sync + 'static,
     S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>
+        + CheckpointRemover<T::Id>
         + Clone
         + Send
         + 'static,

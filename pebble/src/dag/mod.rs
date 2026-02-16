@@ -68,6 +68,7 @@ impl<T> DAGNode<T> {
 #[must_use]
 pub struct DAGStats {
     pub total_nodes: usize,
+    pub edge_count: usize,
     pub root_nodes: usize,
     pub leaf_nodes: usize,
     pub max_depth: usize,
@@ -272,18 +273,16 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
 
     pub fn stats(&self) -> DAGStats {
         let max_depth = self.calculate_max_depth();
+        let edge_count: usize = self.nodes.values().map(|n| n.dependencies.len()).sum();
         let avg_fanout = if !self.nodes.is_empty() {
-            self.nodes
-                .values()
-                .map(|n| n.dependents.len())
-                .sum::<usize>() as f64
-                / self.nodes.len() as f64
+            edge_count as f64 / self.nodes.len() as f64
         } else {
             0.0
         };
 
         DAGStats {
             total_nodes: self.nodes.len(),
+            edge_count,
             root_nodes: self.roots.len(),
             leaf_nodes: self.leaves.len(),
             max_depth,

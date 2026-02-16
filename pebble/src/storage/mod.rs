@@ -28,6 +28,13 @@ impl SessionId for () {}
 
 pub use crate::errors::storage::{IntegrityError, IntegrityErrorKind, StorageError};
 
+/// Remove checkpoints from storage. Complement to `Spout` for writes
+/// and [`CheckpointLoader`] for reads.
+pub trait CheckpointRemover<CId: Copy + Eq + Hash + core::fmt::Debug = u64> {
+    /// Remove a checkpoint by ID. Returns `true` if it existed.
+    fn remove(&mut self, state_id: CId) -> bool;
+}
+
 /// Load checkpoints from storage. Complement to `Spout` for writes.
 pub trait CheckpointLoader<CId: Copy + Eq + Hash + core::fmt::Debug = u64> {
     /// Load serialized checkpoint data by ID.

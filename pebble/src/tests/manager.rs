@@ -358,6 +358,95 @@ fn test_theoretical_validation_space_bound_exceeded() {
 }
 
 #[test]
+fn test_tree_io_bound_end_to_end() {
+    // End-to-end test for the TreeStrategy I/O behavior on a balanced
+    // binary tree.
+    //
+    // The 2-approximation (Gleinig & Hoefler 2022) guarantees that
+    // leaf-first eviction keeps tree roots hot so that reloading an
+    // evicted leaf is cheap — it doesn't cascade into loading the
+    // entire ancestor chain. We verify this by measuring the I/O
+    // cost of the *load phase* separately from the initial fill.
+    //
+    // With hot_capacity = sqrt(T) and a balanced binary tree:
+    // - Fill phase: ~(T - hot_capacity) write I/Os (unavoidable).
+    // - Load phase: each leaf load should cost O(1) I/O because
+    //   ancestors remain hot. At worst, loading also evicts another
+    //   leaf (1 additional write), so we expect ≤ 2 I/Os per load.
+    use crate::strategy::{Strategy, TreeStrategy};
+
+    let total_nodes: u64 = 255; // 2^8 - 1, balanced binary tree
+    let hot_capacity = (total_nodes as usize).isqrt(); // 15
+
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::Tree(TreeStrategy::new()),
+        hot_capacity,
+    );
+
+    // Build balanced binary tree: node i has children 2i+1 and 2i+2.
+    // Insert in BFS order so parents exist before children.
+    for i in 0..total_nodes {
+        let deps = if i == 0 { vec![] } else { vec![(i - 1) / 2] };
+        let cp = TestCheckpoint {
+            id: i,
+            data: alloc::format!("tree-{i}"),
+        };
+        manager.add(cp, &deps).unwrap();
+    }
+
+    manager.flush().unwrap();
+
+    // Record I/O after fill phase.
+    let io_after_fill = manager.stats().io_operations();
+
+    // Load a batch of leaf nodes from cold storage. Leaves are the
+    // last half of the BFS-ordered tree (indices 127..255).
+    let mut loaded = 0;
+    for i in (total_nodes / 2)..total_nodes {
+        if manager.is_in_storage(i) {
+            manager.load(i).unwrap();
+            loaded += 1;
+            if loaded >= hot_capacity {
+                break;
+            }
+        }
+    }
+
+    assert!(loaded > 0, "should have loaded leaves from cold storage");
+
+    // Measure load-phase I/O separately.
+    let io_after_loads = manager.stats().io_operations();
+    let load_phase_io = io_after_loads - io_after_fill;
+
+    // Each leaf load: 1 read from cold. The load may also trigger an
+    // eviction (1 write), so ≤ 2 I/O per load is the expected bound.
+    // We allow 3x as margin for small-scale overhead.
+    let io_per_load = load_phase_io as f64 / loaded as f64;
+    assert!(
+        io_per_load <= 3.0,
+        "tree leaf loads should cost ~1-2 I/O each, got {:.2} \
+         (load_io={}, loaded={})",
+        io_per_load,
+        load_phase_io,
+        loaded,
+    );
+
+    // Space bound: hot_capacity=15 <= 2*sqrt(255)=30
+    let validation = manager.validate_theoretical_bounds();
+    assert!(
+        validation.space_bound_satisfied(),
+        "space bound should hold: hot={}, sqrt({})={}, 2x={}",
+        hot_capacity,
+        total_nodes,
+        (total_nodes as usize).isqrt(),
+        (total_nodes as usize).isqrt() * 2,
+    );
+}
+
+#[test]
 fn test_theoretical_validation_io_bound() {
     // Verify that real I/O is tracked and the io_optimality_ratio reflects it.
     // With hot=10 and 20 nodes, eviction writes bump the I/O counter.

@@ -338,6 +338,44 @@ where
             })
     }
 
+    /// Resize the hot tier capacity at runtime.
+    ///
+    /// If `new_capacity` is smaller than the current red pebble count,
+    /// excess checkpoints are evicted using the active strategy.
+    /// Clamped to a minimum of 1.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn resize_hot(&mut self, new_capacity: usize) -> Result<(), T::Id, C::Error> {
+        let new_capacity = new_capacity.max(1);
+        self.hot_capacity = new_capacity;
+
+        #[cfg(debug_assertions)]
+        {
+            self.game = crate::game::PebbleGame::new(new_capacity);
+            for &id in self.red_pebbles.keys() {
+                self.game.place_red(id);
+            }
+            for &id in &self.blue_pebbles {
+                self.game.place_blue(id);
+            }
+        }
+
+        while self.red_pebbles.len() > self.hot_capacity {
+            self.evict_red_pebbles()?;
+        }
+
+        Ok(())
+    }
+
+    /// Resize the hot tier to the theoretically optimal sqrt(T).
+    ///
+    /// Computes `sqrt(total_checkpoints)` and calls [`resize_hot`](Self::resize_hot).
+    /// Useful for long-running systems where T grows over time.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn resize_optimal(&mut self) -> Result<(), T::Id, C::Error> {
+        let total = self.len();
+        self.resize_hot(total.isqrt().max(1))
+    }
+
     /// Force eviction of older checkpoints to storage. Returns count evicted.
     #[must_use = "this returns a Result that may indicate an error"]
     pub fn compress(&mut self) -> Result<usize, T::Id, C::Error> {

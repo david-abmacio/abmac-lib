@@ -1177,3 +1177,146 @@ fn builder_warm_capacity_configurable() {
     assert_eq!(stats.warm_count(), 2);
     assert!(stats.write_buffer_count() > 0 || stats.blue_pebble_count() > 0);
 }
+
+// Resize
+
+#[test]
+fn test_resize_hot_grow() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
+
+    for i in 0..10 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    // With hot_capacity=4, some have been evicted.
+    manager.flush().unwrap();
+    assert!(manager.red_count() <= 4);
+    assert!(manager.blue_count() > 0);
+
+    // Grow to 20 — no immediate effect, but new adds stay hot.
+    manager.resize_hot(20).unwrap();
+
+    for i in 10..20 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    // All 10 new items should stay hot (no eviction needed).
+    assert!(manager.red_count() > 4);
+    assert!(manager.red_count() <= 20);
+}
+
+#[test]
+fn test_resize_hot_shrink() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        20,
+    );
+
+    for i in 0..10 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    assert_eq!(manager.red_count(), 10);
+    assert_eq!(manager.blue_count(), 0);
+
+    // Shrink to 4 — excess should be evicted.
+    manager.resize_hot(4).unwrap();
+    assert!(manager.red_count() <= 4);
+    manager.flush().unwrap();
+    assert_eq!(manager.red_count() + manager.blue_count(), 10);
+}
+
+#[test]
+fn test_resize_hot_clamps_zero() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        4,
+    );
+
+    manager
+        .add(
+            TestCheckpoint {
+                id: 1,
+                data: "ok".into(),
+            },
+            &[],
+        )
+        .unwrap();
+
+    // Resize to 0 should clamp to 1, keeping exactly one item hot.
+    manager.resize_hot(0).unwrap();
+    assert!(manager.is_hot(1));
+    assert_eq!(manager.red_count(), 1);
+}
+
+#[test]
+fn test_resize_optimal() {
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::default(),
+        200,
+    );
+
+    // Add 100 checkpoints — all stay hot with capacity 200.
+    for i in 0..100 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    assert_eq!(manager.red_count(), 100);
+
+    // resize_optimal: sqrt(100) = 10
+    manager.resize_optimal().unwrap();
+    assert!(
+        manager.red_count() <= 10,
+        "after resize_to_optimal, red count {} should be <= sqrt(100)=10",
+        manager.red_count(),
+    );
+    manager.flush().unwrap();
+    assert_eq!(manager.red_count() + manager.blue_count(), 100);
+}

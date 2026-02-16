@@ -8,13 +8,17 @@ O(sqrt(T)) checkpoint management using the Red-Blue Pebble Game algorithm.
 - **O(sqrt(T)) replay** - Reconstruct any state in at most sqrt(T) operations
 - **no_std by default** - Works in embedded environments (requires `alloc`)
 - **Immutable checkpoints** - Once added, checkpoints cannot be mutated, guaranteeing safe rebuilds
+- **Derive macro** - `#[derive(Checkpoint)]` generates the trait impl for your type
+- **Three-tier storage** - Hot (in-memory), warm (unserialized buffer), and cold (persistent backend)
 - **Pluggable storage** - Abstract over flash, disk, or custom backends
-- **Warm recovery** - Rediscover surviving checkpoints and rebuild the DAG automatically
+- **Auto-resize** - Hot capacity grows automatically to sqrt(T) as checkpoints accumulate
+- **Checkpoint recovery** - Rediscover surviving checkpoints from persistent storage and rebuild the DAG
 - **Branching** - Fork from any historical checkpoint and track branch lineage
+- **Write-ahead manifest** - All cold storage mutations are logged for crash-safe recovery
 
 ## Usage
 
-Implement `Checkpointable` and `CheckpointSerializer` for your type, then pass them to `PebbleManager` or use the builder ([example](examples/basic.rs)).
+Derive `Checkpoint` on your type, then pass it to `PebbleManager` or use the builder ([example](examples/basic.rs)).
 
 ## How It Works
 
@@ -33,13 +37,13 @@ Checkpoints:     [2]         [5]         [8]         [10]
 
 ## The Dependency Graph
 
-Pebble tracks how checkpoints relate to each other using a DAG,  directed acyclic graph.  Pebble records when a checkpoit is created along with its origin. Over time, this forms a graph of dependencies that the algo uses to make eviction and rebuild decisions. If a checkpoint gets evicted from fast memory, pebble walks the graph to find the cheapest way to reconstruct it from what's available. This  prevents it from evicting a checkpoint that others depend on, which would be cheap to keep but expensive to lose.
+Pebble tracks how checkpoints relate to each other using a DAG, a directed acyclic graph. Pebble records when a checkpoint is created along with its origin. Over time, this forms a graph of dependencies that the algorithm uses to make eviction and rebuild decisions. If a checkpoint gets evicted from fast memory, pebble walks the graph to find the cheapest way to reconstruct it from what's available. This prevents it from evicting a checkpoint that others depend on, which would be cheap to keep but expensive to lose.
 
-## Hot and Cold Storage
+## Three-Tier Storage
 
-Checkpoints live in one of two places. Hot storage keeps them in memory where access is immediate. Cold storage serializes them to a backend you provide, whether that's flash, disk, or a custom destination.
+Checkpoints live in one of three places. Hot storage keeps them in memory where access is immediate. Warm storage holds recently evicted checkpoints in an unserialized buffer, avoiding serialization cost if they're needed again soon. Cold storage serializes them to a backend you provide, whether that's flash, disk, or a custom destination.
 
-Hot storage has a fixed capacity, typically around the square root of your total checkpoint count. When it fills up, pebble consults the dependency graph to decide what to evict. Evicted checkpoints get serialized and written to cold storage, and when they're needed again pebble deserializes them back into memory.
+Hot storage starts at a default capacity and automatically grows to the square root of your total checkpoint count as checkpoints accumulate. When it fills up, pebble consults the dependency graph to decide what to evict. Evicted checkpoints pass through warm storage first, then get serialized and written to cold storage. When they're needed again pebble deserializes them back into memory.
 
 The cold backend is pluggable through the `ColdTier` trait. If your backend supports it, pebble can also recover from a restart by walking persisted metadata and rebuilding the dependency graph from what it finds on disk.
 
@@ -51,7 +55,7 @@ The cold backend is pluggable through the `ColdTier` trait. If your backend supp
 
 ## Why not an LRU?
 
-An LRU cache evicts whichever item was *least recently used*. That works when every item is equally cheap to recompute. Checkpoints aren't — some are roots checkpoints depend on, some sit are on critical paths, and some are cheap leaves.
+An LRU cache evicts whichever item was *least recently used*. That works when every item is equally cheap to recompute. Checkpoints aren't — some are roots that others depend on, some are on critical paths, and some are cheap leaves.
 
 Pebble uses the dependency graph to make eviction decisions:
 
@@ -71,10 +75,11 @@ The result is fewer I/O round-trips to storage for the same amount of fast memor
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `cold-buffer` | yes | `RingCold` ring-buffered cold tier |
-| `cold-buffer-std` | | `ParallelCold` multi-threaded I/O (implies `cold-buffer`) |
-| `bytecast` | | Zero-copy `BytecastSerializer` adapter |
-| `verdict` | | `Actionable` error impls for retry integration |
+| `derive` | yes | `#[derive(Checkpoint)]` proc macro |
+| `std` | | `ParallelCold` multi-threaded I/O, `DebugFileStorage` |
+| `serde` | | Serde-based serialization via bytecast |
+| `facet` | | Facet-based serialization via bytecast |
+| `rkyv` | | rkyv-based zero-copy serialization via bytecast |
 
 ## References
 

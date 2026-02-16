@@ -8,6 +8,7 @@ mod branching;
 mod builder;
 pub mod cold;
 mod error;
+mod eviction;
 mod manifest;
 mod pebble_manager;
 mod rebuild;

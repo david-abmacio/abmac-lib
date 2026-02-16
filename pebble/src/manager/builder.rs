@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use pebble::{Checkpoint, PebbleBuilder, InMemoryStorage, DirectStorage, NoWarm};
 //! use spout::DropSpout;
 //!

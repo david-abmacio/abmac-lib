@@ -239,7 +239,7 @@ where
     }
 
     pub(super) fn promote_from_workspace(&mut self, mut workspace: HashMap<T::Id, T>) {
-        let promote_budget = self.hot_capacity / super::pebble_manager::EVICTION_BATCH_DIVISOR;
+        let promote_budget = self.hot_capacity / super::eviction::EVICTION_BATCH_DIVISOR;
         let mut promoted = 0;
 
         let mut candidates: Vec<_> = workspace.keys().copied().collect();

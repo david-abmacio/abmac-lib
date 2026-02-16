@@ -1,53 +1,9 @@
-//! Manager-related error types.
+//! PebbleManager error types.
 
 use alloc::string::String;
 
 use crate::errors::dag::DAGError;
 use crate::errors::storage::StorageError;
-use crate::manager::BranchId;
-
-// ── BranchError ────────────────────────────────────────────────────────
-
-verdict::display_error! {
-    /// Error type for branching operations.
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum BranchError {
-        #[display("branching not enabled")]
-        BranchingNotEnabled,
-
-        #[display("branch {id:?} not found")]
-        BranchNotFound { id: BranchId },
-
-        #[display("fork-point checkpoint not found")]
-        CheckpointNotFound,
-
-        #[display("branch name already used: {name}")]
-        NameAlreadyUsed { name: String },
-    }
-}
-
-// ── DirectStorageError ─────────────────────────────────────────────────
-
-verdict::display_error! {
-    /// Error type for [`DirectStorage`](crate::manager::cold::DirectStorage) operations.
-    ///
-    /// Wraps either a serialization/deserialization error or a storage error.
-    pub enum DirectStorageError {
-        #[display("serializer error: {source}")]
-        Serializer { source: bytecast::BytesError },
-
-        #[display("storage error: {source}")]
-        Storage { source: StorageError },
-    }
-}
-
-impl From<StorageError> for DirectStorageError {
-    fn from(e: StorageError) -> Self {
-        Self::Storage { source: e }
-    }
-}
-
-// ── PebbleManagerError ─────────────────────────────────────────────────
 
 verdict::display_error! {
     /// Error type for PebbleManager operations.

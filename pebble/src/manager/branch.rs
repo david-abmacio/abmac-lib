@@ -30,7 +30,7 @@ pub struct BranchInfo<T> {
     pub head: Option<T>,
 }
 
-pub use crate::errors::manager::BranchError;
+pub use crate::errors::branch::BranchError;
 
 /// Tracks branch metadata for checkpoints.
 ///

@@ -6,7 +6,7 @@ use core::hash::Hash;
 
 use spout::Spout;
 
-pub use crate::errors::manager::DirectStorageError;
+pub use crate::errors::cold::DirectStorageError;
 use crate::manager::traits::Checkpointable;
 use crate::storage::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId};
 use bytecast::ByteSerializer;

@@ -12,7 +12,7 @@
 //!
 //! # Quick Start
 //!
-//! ```ignore
+//! ```
 //! use pebble::{Checkpoint, PebbleBuilder, InMemoryStorage, DirectStorage, NoWarm};
 //! use spout::DropSpout;
 //!
@@ -51,7 +51,6 @@ pub mod manager;
 pub(crate) mod storage;
 pub(crate) mod strategy;
 
-#[cfg(feature = "verdict")]
 mod verdict_support;
 
 #[cfg(test)]

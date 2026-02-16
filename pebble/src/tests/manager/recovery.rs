@@ -1,7 +1,7 @@
 //! Recovery tests for PebbleManager.
 
 use super::*;
-use crate::storage::RecoveryMode;
+use crate::storage::{RecoverableStorage, RecoveryMode};
 
 #[test]
 fn test_recover_cold_start() {
@@ -104,8 +104,10 @@ fn test_recover_with_dependencies() {
     }
     manager.flush().unwrap();
 
-    let in_storage = manager.blue_count();
-    assert!(in_storage > 0, "Should have some checkpoints in storage");
+    // After flush, cold storage holds both evicted items (blue) and
+    // dirty-flushed hot items. Use iter_metadata to get the true count.
+    let in_cold = manager.cold().storage().iter_metadata().count();
+    assert!(in_cold > 0, "Should have some checkpoints in storage");
 
     let storage = core::mem::replace(
         manager.cold_mut().storage_mut(),
@@ -125,5 +127,5 @@ fn test_recover_with_dependencies() {
 
     assert_eq!(result.mode, RecoveryMode::WarmRestart);
     assert!(result.integrity_errors.is_empty());
-    assert_eq!(recovered_manager.len(), in_storage);
+    assert_eq!(recovered_manager.len(), in_cold);
 }

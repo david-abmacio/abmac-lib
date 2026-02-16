@@ -57,6 +57,9 @@ where
     pub(super) checkpoints_added: u64,
     pub(super) io_operations: u64,
     pub(super) auto_resize: bool,
+    /// Hot-tier items that have never been written to cold storage.
+    /// Cleared when the item reaches cold (via eviction, flush, or dirty flush).
+    pub(super) dirty: HashSet<T::Id>,
     pub(super) branches: Option<super::branch::BranchTracker<T::Id>>,
     #[cfg(debug_assertions)]
     pub(super) game: crate::game::PebbleGame<T::Id>,
@@ -92,6 +95,7 @@ where
             checkpoints_added: 0,
             io_operations: 0,
             auto_resize,
+            dirty: HashSet::new(),
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),
@@ -117,6 +121,7 @@ where
 
         // Add to fast memory
         self.red_pebbles.insert(state_id, checkpoint);
+        self.dirty.insert(state_id);
         self.checkpoints_added = self.checkpoints_added.saturating_add(1);
         self.track_new_checkpoint(state_id);
 
@@ -152,6 +157,7 @@ where
 
         // Add to fast memory
         self.red_pebbles.insert(state_id, checkpoint);
+        self.dirty.insert(state_id);
         self.checkpoints_added = self.checkpoints_added.saturating_add(1);
         self.track_new_checkpoint(state_id);
 
@@ -500,11 +506,37 @@ where
                 });
             }
             self.blue_pebbles.insert(id);
+            self.dirty.remove(&id);
             self.io_operations = self.io_operations.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.game.place_blue(id);
         }
+
+        // Persist dirty hot-tier items to cold storage. Items stay in
+        // red_pebbles for fast access but are now also in cold for
+        // durability. We don't add to blue_pebbles to avoid double-counting
+        // in stats — recovery uses iter_metadata(), not blue_pebbles.
+        let dirty_ids: Vec<T::Id> = self.dirty.drain().collect();
+        for id in dirty_ids {
+            let Some(checkpoint) = self.red_pebbles.get(&id) else {
+                continue;
+            };
+            let deps = self
+                .dag
+                .get_node(id)
+                .map(|n| n.dependencies())
+                .unwrap_or(&[]);
+            self.manifest.record(id, deps)?;
+            self.cold
+                .store(id, checkpoint)
+                .map_err(|e| PebbleManagerError::Serialization {
+                    state_id: id,
+                    source: e,
+                })?;
+            self.io_operations = self.io_operations.saturating_add(1);
+        }
+
         // Flush cold tier buffers to storage
         self.cold
             .flush()
@@ -576,6 +608,7 @@ where
             return false;
         }
 
+        self.dirty.remove(&state_id);
         self.dag.remove_node(state_id);
         if let Some(ref mut tracker) = self.branches {
             tracker.remove_checkpoint(state_id);

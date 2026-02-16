@@ -101,6 +101,7 @@ where
                 });
             }
             self.blue_pebbles.insert(overflow_id);
+            self.dirty.remove(&overflow_id);
             self.io_operations = self.io_operations.saturating_add(1);
         }
         Ok(())

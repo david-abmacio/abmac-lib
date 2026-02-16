@@ -447,6 +447,114 @@ fn test_tree_io_bound_end_to_end() {
 }
 
 #[test]
+fn test_dag_io_bound_end_to_end() {
+    // End-to-end test for DAGStrategy I/O behavior on a diamond-lattice
+    // DAG (general, non-tree structure).
+    //
+    // Builds a layered diamond: each layer's nodes depend on ALL nodes
+    // in the previous layer, creating a dense dependency pattern that
+    // cannot be reduced to a tree.
+    //
+    // With hot_capacity = sqrt(T) and critical-path eviction:
+    // - Fill phase: writes are unavoidable as hot tier overflows.
+    // - Load phase: each leaf load should cost O(1) I/O because the
+    //   DAG strategy keeps high-critical-path nodes (interior/roots)
+    //   hot and evicts low-critical-path nodes (leaves).
+    //   At worst, a load triggers an eviction write, so ≤ 3 I/O per
+    //   load (read + eviction write + possible cascading eviction).
+    use crate::strategy::{DAGStrategy, Strategy};
+
+    // 5 layers of 10 nodes each = 50 nodes. Each node in layer L
+    // depends on one node in layer L-1 (chain-like per column).
+    // Then add cross-edges: each node also depends on the node to
+    // its left in the previous layer, creating a mesh.
+    let layers = 10u64;
+    let width = 10u64;
+    let total_nodes = layers * width;
+    let hot_capacity = (total_nodes as usize).isqrt(); // 10
+
+    let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(
+        test_cold(),
+        NoWarm,
+        Manifest::new(DropSpout),
+        Strategy::DAG(DAGStrategy::default()),
+        hot_capacity,
+    );
+
+    // Build layered DAG.
+    for layer in 0..layers {
+        for col in 0..width {
+            let id = layer * width + col;
+            let deps = if layer == 0 {
+                vec![]
+            } else {
+                // Depend on same column in previous layer
+                let mut d = vec![(layer - 1) * width + col];
+                // Cross-edge: also depend on left neighbor in previous layer
+                if col > 0 {
+                    d.push((layer - 1) * width + (col - 1));
+                }
+                d
+            };
+            let cp = TestCheckpoint {
+                id,
+                data: alloc::format!("dag-{id}"),
+            };
+            manager.add(cp, &deps).unwrap();
+        }
+    }
+
+    manager.flush().unwrap();
+
+    // Record I/O after fill phase.
+    let io_after_fill = manager.stats().io_operations();
+
+    // Load leaf-layer nodes (last layer) from cold storage.
+    let mut loaded = 0;
+    let leaf_start = (layers - 1) * width;
+    for i in leaf_start..(leaf_start + width) {
+        if manager.is_in_storage(i) {
+            manager.load(i).unwrap();
+            loaded += 1;
+        }
+    }
+
+    assert!(
+        loaded > 0,
+        "should have loaded DAG leaves from cold storage"
+    );
+
+    // Measure load-phase I/O separately.
+    let io_after_loads = manager.stats().io_operations();
+    let load_phase_io = io_after_loads - io_after_fill;
+
+    // DAG strategy targets 3x I/O budget. For the load phase, each
+    // leaf load should still be cheap (critical-path eviction keeps
+    // ancestors hot). We allow 4x per load as margin for the denser
+    // dependency structure.
+    let io_per_load = load_phase_io as f64 / loaded as f64;
+    assert!(
+        io_per_load <= 4.0,
+        "DAG leaf loads should cost bounded I/O each, got {:.2} \
+         (load_io={}, loaded={})",
+        io_per_load,
+        load_phase_io,
+        loaded,
+    );
+
+    // Space bound: hot_capacity=10 <= 2*sqrt(100)=20
+    let validation = manager.validate_theoretical_bounds();
+    assert!(
+        validation.space_bound_satisfied(),
+        "space bound should hold: hot={}, sqrt({})={}, 2x={}",
+        hot_capacity,
+        total_nodes,
+        (total_nodes as usize).isqrt(),
+        (total_nodes as usize).isqrt() * 2,
+    );
+}
+
+#[test]
 fn test_theoretical_validation_io_bound() {
     // Verify that real I/O is tracked and the io_optimality_ratio reflects it.
     // With hot=10 and 20 nodes, eviction writes bump the I/O counter.

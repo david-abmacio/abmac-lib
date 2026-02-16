@@ -415,11 +415,11 @@ where
         let warm_count = self.warm.len();
         let total_nodes = self.red_pebbles.len() + self.blue_pebbles.len() + warm_count;
 
-        let theoretical_min_io = if self.hot_capacity > 0 {
-            total_nodes.div_ceil(self.hot_capacity).max(1) as u64
-        } else {
-            total_nodes as u64
-        };
+        // Lower bound: every node beyond hot_capacity must be written
+        // to storage at least once. This is a true minimum — you cannot
+        // process T nodes through S hot slots without at least T - S
+        // eviction writes.
+        let theoretical_min_io = total_nodes.saturating_sub(self.hot_capacity).max(1) as u64;
 
         // Optimal fast memory is O(sqrt(T))
         let optimal_hot = total_nodes.isqrt();

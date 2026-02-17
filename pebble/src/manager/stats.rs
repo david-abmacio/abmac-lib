@@ -10,6 +10,8 @@ pub struct PebbleStats {
     warm_count: usize,
     write_buffer_count: usize,
     io_operations: u64,
+    warm_hits: u64,
+    cold_loads: u64,
     hot_utilization: f64,
     theoretical_min_io: u64,
     io_optimality_ratio: f64,
@@ -25,6 +27,8 @@ impl PebbleStats {
         warm_count: usize,
         write_buffer_count: usize,
         io_operations: u64,
+        warm_hits: u64,
+        cold_loads: u64,
         hot_utilization: f64,
         theoretical_min_io: u64,
         io_optimality_ratio: f64,
@@ -37,6 +41,8 @@ impl PebbleStats {
             warm_count,
             write_buffer_count,
             io_operations,
+            warm_hits,
+            cold_loads,
             hot_utilization,
             theoretical_min_io,
             io_optimality_ratio,
@@ -72,6 +78,16 @@ impl PebbleStats {
     #[inline]
     pub fn io_operations(&self) -> u64 {
         self.io_operations
+    }
+
+    #[inline]
+    pub fn warm_hits(&self) -> u64 {
+        self.warm_hits
+    }
+
+    #[inline]
+    pub fn cold_loads(&self) -> u64 {
+        self.cold_loads
     }
 
     #[inline]

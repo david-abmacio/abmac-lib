@@ -44,6 +44,8 @@ where
             manifest,
             checkpoints_added: 0,
             io_operations: 0,
+            warm_hits: 0,
+            cold_loads: 0,
             auto_resize,
             dirty: HashSet::new(),
             tombstoned: HashSet::new(),

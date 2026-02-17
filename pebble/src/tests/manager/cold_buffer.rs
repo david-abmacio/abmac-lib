@@ -269,6 +269,47 @@ fn flush_drains_write_buffer_to_storage() {
 }
 
 #[test]
+fn warm_hit_and_cold_load_stats() {
+    let mut manager = test_spill_manager(2);
+
+    for i in 0..6 {
+        manager
+            .add(
+                TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("data{i}"),
+                },
+                &[],
+            )
+            .unwrap();
+    }
+
+    assert_eq!(manager.stats().warm_hits(), 0);
+    assert_eq!(manager.stats().cold_loads(), 0);
+
+    // Load from warm tier.
+    let warm_id = (0..6).find(|&i| manager.is_in_warm(i)).unwrap();
+    manager.load(warm_id).unwrap();
+    assert_eq!(manager.stats().warm_hits(), 1);
+    assert_eq!(manager.stats().cold_loads(), 0);
+
+    // Flush everything to cold so we can load from there.
+    manager.flush().unwrap();
+
+    let cold_id = (0..6).find(|&i| manager.is_in_storage(i)).unwrap();
+    manager.load(cold_id).unwrap();
+    assert_eq!(manager.stats().cold_loads(), 1);
+
+    // Hot hit should not increment either counter.
+    let hot_id = (0..6).find(|&i| manager.is_hot(i)).unwrap();
+    let warm_before = manager.stats().warm_hits();
+    let cold_before = manager.stats().cold_loads();
+    manager.load(hot_id).unwrap();
+    assert_eq!(manager.stats().warm_hits(), warm_before);
+    assert_eq!(manager.stats().cold_loads(), cold_before);
+}
+
+#[test]
 fn load_from_storage_through_write_buffer() {
     let mut manager = test_spill_manager(2);
 

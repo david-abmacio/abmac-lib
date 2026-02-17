@@ -56,6 +56,8 @@ where
     pub(super) manifest: Manifest<T::Id, S>,
     pub(super) checkpoints_added: u64,
     pub(super) io_operations: u64,
+    pub(super) warm_hits: u64,
+    pub(super) cold_loads: u64,
     pub(super) auto_resize: bool,
     /// Hot-tier items that have never been written to cold storage.
     /// Cleared when the item reaches cold (via eviction, flush, or dirty flush).
@@ -97,6 +99,8 @@ where
             manifest,
             checkpoints_added: 0,
             io_operations: 0,
+            warm_hits: 0,
+            cold_loads: 0,
             auto_resize,
             dirty: HashSet::new(),
             tombstoned: HashSet::new(),
@@ -279,6 +283,7 @@ where
             }
             self.red_pebbles.insert(state_id, checkpoint);
             self.dag.mark_accessed(state_id);
+            self.warm_hits = self.warm_hits.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.debug_place_red(state_id);
@@ -310,6 +315,7 @@ where
         self.red_pebbles.insert(state_id, checkpoint);
         self.blue_pebbles.remove(&state_id);
         self.io_operations = self.io_operations.saturating_add(1);
+        self.cold_loads = self.cold_loads.saturating_add(1);
         self.dag.mark_accessed(state_id);
 
         #[cfg(debug_assertions)]
@@ -436,6 +442,8 @@ where
             warm_count,
             self.cold.buffered_count(),
             self.io_operations,
+            self.warm_hits,
+            self.cold_loads,
             if self.hot_capacity > 0 {
                 self.red_pebbles.len() as f64 / self.hot_capacity as f64
             } else {

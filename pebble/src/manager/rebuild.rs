@@ -140,7 +140,7 @@ where
             });
         }
 
-        self.io_operations = self.io_operations.saturating_add(1);
+        self.io_reads = self.io_reads.saturating_add(1);
         self.load_from_cold(node_id)
     }
 
@@ -211,7 +211,7 @@ where
         // this or subsequent rebuild steps.
         for dep_id in cold_loads {
             let checkpoint = self.load_from_cold(dep_id)?;
-            self.io_operations = self.io_operations.saturating_add(1);
+            self.io_reads = self.io_reads.saturating_add(1);
             self.red_pebbles.insert(dep_id, checkpoint);
             self.blue_pebbles.remove(&dep_id);
 

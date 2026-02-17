@@ -55,7 +55,8 @@ where
     pub(super) warm: W,
     pub(super) manifest: Manifest<T::Id, S>,
     pub(super) checkpoints_added: u64,
-    pub(super) io_operations: u64,
+    pub(super) io_reads: u64,
+    pub(super) io_writes: u64,
     pub(super) warm_hits: u64,
     pub(super) cold_loads: u64,
     pub(super) auto_resize: bool,
@@ -98,7 +99,8 @@ where
             warm,
             manifest,
             checkpoints_added: 0,
-            io_operations: 0,
+            io_reads: 0,
+            io_writes: 0,
             warm_hits: 0,
             cold_loads: 0,
             auto_resize,
@@ -314,7 +316,7 @@ where
 
         self.red_pebbles.insert(state_id, checkpoint);
         self.blue_pebbles.remove(&state_id);
-        self.io_operations = self.io_operations.saturating_add(1);
+        self.io_reads = self.io_reads.saturating_add(1);
         self.cold_loads = self.cold_loads.saturating_add(1);
         self.dag.mark_accessed(state_id);
 
@@ -435,13 +437,16 @@ where
             1.0
         };
 
+        let io_total = self.io_reads + self.io_writes;
+
         PebbleStats::new(
             self.checkpoints_added,
             self.red_pebbles.len(),
             self.blue_pebbles.len(),
             warm_count,
             self.cold.buffered_count(),
-            self.io_operations,
+            self.io_reads,
+            self.io_writes,
             self.warm_hits,
             self.cold_loads,
             if self.hot_capacity > 0 {
@@ -451,7 +456,7 @@ where
             },
             theoretical_min_io,
             if theoretical_min_io > 0 {
-                self.io_operations as f64 / theoretical_min_io as f64
+                io_total as f64 / theoretical_min_io as f64
             } else {
                 1.0
             },
@@ -529,7 +534,7 @@ where
                     state_id: id,
                     source: e,
                 })?;
-            self.io_operations = self.io_operations.saturating_add(1);
+            self.io_writes = self.io_writes.saturating_add(1);
         }
 
         // Flush cold tier buffers to storage
@@ -733,7 +738,7 @@ where
                 state_id: id,
                 source: e,
             })?;
-        self.io_operations = self.io_operations.saturating_add(1);
+        self.io_writes = self.io_writes.saturating_add(1);
         Ok(())
     }
 

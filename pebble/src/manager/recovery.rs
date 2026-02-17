@@ -43,7 +43,8 @@ where
             warm,
             manifest,
             checkpoints_added: 0,
-            io_operations: 0,
+            io_reads: 0,
+            io_writes: 0,
             warm_hits: 0,
             cold_loads: 0,
             auto_resize,
@@ -173,7 +174,7 @@ where
 
             self.red_pebbles.insert(state_id, checkpoint);
             self.blue_pebbles.remove(&state_id);
-            self.io_operations = self.io_operations.saturating_add(1);
+            self.io_reads = self.io_reads.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.game.move_to_red(state_id);

@@ -46,6 +46,7 @@ where
             io_operations: 0,
             auto_resize,
             dirty: HashSet::new(),
+            tombstoned: HashSet::new(),
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),

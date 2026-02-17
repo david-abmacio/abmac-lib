@@ -46,10 +46,16 @@ fn test_tombstone_recorded_on_cold_remove() {
     assert_eq!(tombstones.len(), 1);
     assert_eq!(tombstones[0].checkpoint_id, cold_id);
 
-    // Cold storage should be cleaned up immediately.
+    // Cold data remains until compact() purges it.
+    assert!(
+        manager.cold().storage().contains(cold_id),
+        "cold data should survive remove() until compact()"
+    );
+
+    manager.compact();
     assert!(
         !manager.cold().storage().contains(cold_id),
-        "cold storage should no longer contain removed checkpoint"
+        "cold data should be purged after compact()"
     );
 }
 
@@ -169,12 +175,21 @@ fn test_cold_storage_cleaned_on_remove() {
         assert!(manager.cold().storage().contains(id));
     }
 
-    // Remove cold checkpoints and verify storage is cleaned up.
+    // Remove cold checkpoints — data stays until compact().
     for &id in &cold_ids {
         assert!(manager.remove(id));
         assert!(
+            manager.cold().storage().contains(id),
+            "cold data for {id} should survive remove()"
+        );
+    }
+
+    // compact() purges the data.
+    manager.compact();
+    for &id in &cold_ids {
+        assert!(
             !manager.cold().storage().contains(id),
-            "cold storage should not contain {id} after removal"
+            "cold data for {id} should be gone after compact()"
         );
     }
 

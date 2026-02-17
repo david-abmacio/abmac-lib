@@ -13,6 +13,7 @@ use super::fixtures::{TestCheckpoint, test_cold};
 mod basic;
 mod builder;
 mod cold_buffer;
+mod compact;
 mod dirty;
 mod rebuild;
 mod recovery;

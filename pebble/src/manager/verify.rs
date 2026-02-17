@@ -52,7 +52,11 @@ where
         let mut entry_count: u64 = 0;
 
         for entry in manifest_entries {
-            manifest_ids.insert(entry.checkpoint_id);
+            // Tombstoned checkpoints are removed — they don't count as
+            // covering a DAG node.
+            if !entry.tombstone {
+                manifest_ids.insert(entry.checkpoint_id);
+            }
             max_seq = Some(max_seq.map_or(entry.seq, |m: u64| m.max(entry.seq)));
             entry_count += 1;
         }

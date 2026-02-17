@@ -60,6 +60,9 @@ where
     /// Hot-tier items that have never been written to cold storage.
     /// Cleared when the item reaches cold (via eviction, flush, or dirty flush).
     pub(super) dirty: HashSet<T::Id>,
+    /// Cold-tier items flagged for removal. Data remains in cold storage
+    /// until `compact()` physically purges it.
+    pub(super) tombstoned: HashSet<T::Id>,
     pub(super) branches: Option<super::branch::BranchTracker<T::Id>>,
     #[cfg(debug_assertions)]
     pub(super) game: crate::game::PebbleGame<T::Id>,
@@ -96,6 +99,7 @@ where
             io_operations: 0,
             auto_resize,
             dirty: HashSet::new(),
+            tombstoned: HashSet::new(),
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),
@@ -581,6 +585,11 @@ where
     }
 
     /// Remove a checkpoint. Returns `true` if found and removed.
+    ///
+    /// Flags the checkpoint with a tombstone in the WAL. The data
+    /// remains in cold storage until `compact()` physically purges it.
+    /// Hot and warm tier data is dropped immediately (unserialized,
+    /// not persisted).
     pub fn remove(&mut self, state_id: T::Id) -> bool {
         // Remove from whichever tier holds it (hot, warm, or cold).
         let was_in_hot = self.red_pebbles.remove(&state_id).is_some();
@@ -597,12 +606,11 @@ where
             tracker.remove_checkpoint(state_id);
         }
 
-        // Write-ahead: record tombstone first, then delete from cold storage.
-        // If we crash between (1) and (2), recovery sees the tombstone and
-        // ignores any stale data still in cold storage.
+        // Record tombstone for cold-tier items. The data stays in cold
+        // storage until compact() physically purges it.
         if was_in_cold {
             self.manifest.record_tombstone(state_id);
-            let _ = self.cold.remove(state_id);
+            self.tombstoned.insert(state_id);
         }
 
         // The game tracks hot and cold tiers (not warm).
@@ -613,6 +621,87 @@ where
         }
 
         true
+    }
+
+    /// Compact the manifest. Physically purges cold storage data for
+    /// tombstoned checkpoints and cascades to orphaned descendants
+    /// whose parents have all been removed or purged.
+    ///
+    /// Returns the number of checkpoints purged from cold storage.
+    pub fn compact(&mut self) -> usize {
+        let mut purged = 0usize;
+
+        // Phase 1: purge tombstoned items from cold storage.
+        let tombstoned: Vec<T::Id> = self.tombstoned.drain().collect();
+        for id in &tombstoned {
+            let _ = self.cold.remove(*id);
+            purged += 1;
+        }
+
+        // Phase 2: cascade — find and purge orphaned descendants.
+        // An orphan is a DAG root with computation_cost > 0, meaning
+        // it was originally added with dependencies but all parents
+        // have since been removed. Original roots have cost == 0.
+        let mut worklist: Vec<T::Id> = self
+            .dag
+            .roots
+            .iter()
+            .filter(|&&id| {
+                self.dag
+                    .get_node(id)
+                    .map(|n| n.computation_cost() > 0)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
+
+        while let Some(id) = worklist.pop() {
+            // Collect dependents before removal.
+            let dependents: Vec<T::Id> = self
+                .dag
+                .get_node(id)
+                .map(|n| n.dependents().to_vec())
+                .unwrap_or_default();
+
+            // Remove from tiers.
+            let was_in_hot = self.red_pebbles.remove(&id).is_some();
+            let was_in_warm = !was_in_hot && self.warm.remove(id).is_some();
+            let was_in_cold = !was_in_hot && !was_in_warm && self.blue_pebbles.remove(&id);
+
+            self.dirty.remove(&id);
+            self.dag.remove_node(id);
+            if let Some(ref mut tracker) = self.branches {
+                tracker.remove_checkpoint(id);
+            }
+
+            if was_in_cold {
+                self.manifest.record_tombstone(id);
+                let _ = self.cold.remove(id);
+                purged += 1;
+            }
+
+            #[cfg(debug_assertions)]
+            if was_in_hot || was_in_cold {
+                self.game.remove_node(id);
+            }
+
+            // Check if any children are now orphaned.
+            for child_id in dependents {
+                let is_orphan = self
+                    .dag
+                    .get_node(child_id)
+                    .map(|n| n.dependencies().is_empty() && n.computation_cost() > 0)
+                    .unwrap_or(false);
+                if is_orphan {
+                    worklist.push(child_id);
+                }
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        self.debug_validate();
+
+        purged
     }
 
     // --- Internal ---

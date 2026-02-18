@@ -376,6 +376,95 @@ mod worker_pool_tests {
         let result = pool.collect(&mut spout);
         assert!(result.is_err());
     }
+
+    // --- Feature 2: FanInSpout ---
+
+    #[test]
+    fn fan_in_scoped_basic() {
+        use spout::Spout;
+
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(id as u64 * 10000 + i);
+            }
+        });
+
+        pool.run(&100);
+
+        let mut collected = std::vec::Vec::new();
+        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+            fan_in.flush().unwrap();
+            collected = fan_in.inner().items().to_vec();
+        });
+        assert_eq!(collected.len(), 400);
+    }
+
+    #[test]
+    fn fan_in_send_passthrough() {
+        use spout::Spout;
+
+        let mut pool = MpscRing::<u64, 256>::pool(1).spawn(|_ring, _id, _args: &()| {});
+
+        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+            fan_in.send(42).unwrap();
+            fan_in.send(43).unwrap();
+            assert_eq!(fan_in.inner().items(), &[42, 43]);
+        });
+    }
+
+    #[test]
+    fn fan_in_multiple_flushes() {
+        use spout::Spout;
+
+        let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
+            ring.push(1);
+        });
+
+        pool.run(&());
+
+        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+            fan_in.flush().unwrap();
+            let first = fan_in.inner().items().len();
+            assert_eq!(first, 2);
+
+            fan_in.flush().unwrap(); // no new batches — nothing collected
+            assert_eq!(fan_in.inner().items().len(), 2);
+        });
+    }
+
+    #[test]
+    fn fan_in_num_slots() {
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|_ring, _id, _args: &()| {});
+
+        pool.with_fan_in(CollectSpout::<u64>::new(), |fan_in| {
+            assert_eq!(fan_in.num_slots(), 4);
+        });
+    }
+
+    #[test]
+    fn fan_in_then_dispatch_join() {
+        use spout::Spout;
+
+        // Verify pool is usable after with_fan_in scope ends
+        let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
+            ring.push(1);
+        });
+
+        pool.run(&());
+
+        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+            fan_in.flush().unwrap();
+            assert_eq!(fan_in.inner().items().len(), 2);
+        });
+
+        // Pool regains &mut self — can dispatch again
+        pool.dispatch(&());
+        pool.join().unwrap();
+
+        let mut sink = CollectSpout::new();
+        pool.collect(&mut sink).unwrap();
+        assert_eq!(sink.items().len(), 2);
+    }
 }
 
 // --- Missing coverage tests ---

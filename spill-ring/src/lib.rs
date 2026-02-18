@@ -22,6 +22,6 @@ pub use iter::{SpillRingIter, SpillRingIterMut};
 #[cfg(feature = "alloc")]
 pub use mpsc::{Consumer, MpscRing, Producer};
 #[cfg(feature = "std")]
-pub use mpsc::{PoolBuilder, WorkerPanic, WorkerPool};
+pub use mpsc::{FanInSpout, PoolBuilder, WorkerPanic, WorkerPool};
 pub use ring::{Drain, SpillRing};
 pub use traits::{RingConsumer, RingInfo, RingProducer, RingTrait};

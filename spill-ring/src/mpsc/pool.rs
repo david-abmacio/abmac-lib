@@ -17,6 +17,7 @@ use crate::SpillRing;
 use spout::{DropSpout, Spout};
 
 use super::Consumer;
+use super::fan_in::FanInSpout;
 use super::handoff::{HandoffSlot, WorkerSignal};
 use super::sync;
 
@@ -419,6 +420,64 @@ where
             }
         }
         Ok(total)
+    }
+
+    /// Execute a closure with a [`FanInSpout`] that collects from all
+    /// handoff slots.
+    ///
+    /// The `FanInSpout` cannot escape the closure — its raw pointers to
+    /// handoff slots are valid only for the closure's duration. When the
+    /// closure returns, the pool regains `&mut self` for subsequent
+    /// `dispatch()`/`join()` calls.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use spill_ring::MpscRing;
+    /// use spout::{CollectSpout, Spout};
+    ///
+    /// let mut pool = MpscRing::<u64, 256>::pool(2)
+    ///     .spawn(|ring, _id, count: &u64| {
+    ///         for i in 0..*count {
+    ///             ring.push(i);
+    ///         }
+    ///     });
+    ///
+    /// pool.run(&10);
+    ///
+    /// pool.with_fan_in(CollectSpout::new(), |fan_in| {
+    ///     fan_in.flush()
+    /// }).unwrap();
+    /// ```
+    pub fn with_fan_in<Out, R>(
+        &mut self,
+        inner: Out,
+        f: impl FnOnce(&mut FanInSpout<T, N, S, Out>) -> R,
+    ) -> R
+    where
+        Out: Spout<T>,
+    {
+        let slot_ptrs = FanInSpout::<T, N, S, Out>::slot_ptrs_from(&self.slots);
+
+        // SAFETY: Slot pointers are valid for the duration of the closure.
+        // The pool's &mut self borrow prevents dropping the pool or calling
+        // dispatch/join until the closure returns.
+        let mut fan_in = unsafe { FanInSpout::new(slot_ptrs, inner) };
+        f(&mut fan_in)
+    }
+
+    /// Create a [`FanInSpout`] with raw pointers to all handoff slots.
+    ///
+    /// # Safety
+    ///
+    /// The returned `FanInSpout` must not outlive `self`. The caller must
+    /// ensure the pool is not dropped while the `FanInSpout` exists.
+    /// Prefer [`with_fan_in()`](Self::with_fan_in) for the safe scoped API.
+    pub unsafe fn fan_in_unchecked<Out: Spout<T>>(&self, inner: Out) -> FanInSpout<T, N, S, Out> {
+        let slot_ptrs = FanInSpout::<T, N, S, Out>::slot_ptrs_from(&self.slots);
+
+        // SAFETY: Caller guarantees the pool outlives the returned FanInSpout.
+        unsafe { FanInSpout::new(slot_ptrs, inner) }
     }
 
     /// Run the work function on all workers with the given arguments.

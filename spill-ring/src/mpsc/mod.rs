@@ -34,6 +34,8 @@ mod consumer;
 mod producer;
 
 #[cfg(feature = "std")]
+mod fan_in;
+#[cfg(feature = "std")]
 mod handoff;
 #[cfg(feature = "std")]
 mod pool;
@@ -41,6 +43,8 @@ mod pool;
 mod sync;
 
 pub use consumer::Consumer;
+#[cfg(feature = "std")]
+pub use fan_in::FanInSpout;
 #[cfg(feature = "std")]
 pub use pool::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use producer::Producer;

@@ -547,6 +547,12 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Spout<T>
     }
 }
 
+/// On drop, flushes all buffered items to the spout, then flushes the spout itself.
+///
+/// When rings are chained (e.g. `ring1 → ring2 → ring3`), each ring's drop
+/// triggers the next ring's `send` + `flush`, producing an O(depth) sequential
+/// cascade. This is bounded by the number of rings the caller constructs and
+/// is not a concern for typical usage (1–3 levels).
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Drop
     for SpillRing<T, N, S>
 {

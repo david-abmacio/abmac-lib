@@ -45,6 +45,16 @@ mod var_int {
     /// Decode a var_int from the buffer. Returns (value, bytes consumed).
     #[inline]
     pub fn decode(buf: &[u8]) -> Result<(u32, usize), BytesError> {
+        let (result, consumed) = decode_raw(buf)?;
+        if consumed != len(result) {
+            return Err(BytesError::InvalidData {
+                message: "non-canonical var_int encoding",
+            });
+        }
+        Ok((result, consumed))
+    }
+
+    fn decode_raw(buf: &[u8]) -> Result<(u32, usize), BytesError> {
         let mut result: u32 = 0;
         let mut shift = 0;
 

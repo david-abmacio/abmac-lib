@@ -437,6 +437,14 @@ fn test_tuple_mixed() {
 }
 
 #[test]
+fn test_varint_rejects_non_canonical() {
+    // Value 1 encoded as 2 bytes: [0x81, 0x00] instead of canonical [0x01]
+    let buf = [0x81, 0x00, 0x01]; // non-canonical length 1, then one byte of data
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_vec_zst_rejects_oversized_length() {
     // Craft a payload claiming u32::MAX elements of () (ZST).
     // varint encoding of u32::MAX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F]

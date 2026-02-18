@@ -175,10 +175,9 @@ where
         self.inner
     }
 
-    fn ensure_inner(&mut self) {
-        if self.inner.is_none() {
-            self.inner = Some((self.factory)(self.producer_id));
-        }
+    fn ensure_inner(&mut self) -> &mut S {
+        self.inner
+            .get_or_insert_with(|| (self.factory)(self.producer_id))
     }
 }
 
@@ -191,8 +190,7 @@ where
 
     #[inline]
     fn send(&mut self, item: T) -> Result<(), Self::Error> {
-        self.ensure_inner();
-        self.inner.as_mut().unwrap().send(item)
+        self.ensure_inner().send(item)
     }
 
     #[inline]

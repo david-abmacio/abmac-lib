@@ -2,6 +2,7 @@ use std::sync::mpsc;
 
 use crate::Spout;
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct ChannelSpout<T> {
     sender: mpsc::Sender<T>,
@@ -56,6 +57,7 @@ impl<T> Spout<T> for ChannelSpout<T> {
 /// assert_eq!(rx.recv().unwrap(), 1);
 /// assert_eq!(rx.recv().unwrap(), 2);
 /// ```
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct SyncChannelSpout<T> {
     sender: mpsc::SyncSender<T>,

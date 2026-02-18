@@ -13,6 +13,7 @@ use crate::Spout;
 /// are portable across architectures.
 ///
 /// Compose with `ProducerSpout` for tagged, framed output.
+#[must_use]
 pub struct FramedSpout<S> {
     inner: S,
     producer_id: usize,

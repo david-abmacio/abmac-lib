@@ -5,6 +5,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::{Flush, Spout};
 
 /// Drops all items.
+#[must_use]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DropSpout;
 
@@ -18,6 +19,7 @@ impl<T> Spout<T> for DropSpout {
 }
 
 /// Collects evicted items into a Vec.
+#[must_use]
 #[derive(Debug, Clone, Default)]
 pub struct CollectSpout<T> {
     items: Vec<T>,
@@ -62,6 +64,7 @@ impl<T> Spout<T> for CollectSpout<T> {
 }
 
 /// Calls a closure for each item.
+#[must_use]
 #[derive(Debug)]
 pub struct FnSpout<F>(pub F);
 
@@ -76,6 +79,7 @@ impl<T, F: FnMut(T)> Spout<T> for FnSpout<F> {
 }
 
 /// Calls separate closures for send and flush.
+#[must_use]
 #[derive(Debug)]
 pub struct FnFlushSpout<S, F> {
     send: S,
@@ -123,6 +127,7 @@ where
 ///
 /// Clone is cheap — only the factory is cloned, the inner spout is created
 /// on demand.
+#[must_use]
 pub struct ProducerSpout<S, F> {
     /// The inner spout (created lazily on first send)
     inner: Option<S>,
@@ -211,6 +216,7 @@ where
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct BatchSpout<T, S> {
     pub(crate) buffer: Vec<T>,
@@ -297,6 +303,7 @@ impl<T, S: Spout<Vec<T>>> Spout<T> for BatchSpout<T, S> {
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct ReduceSpout<T, R, F, S> {
     buffer: Vec<T>,

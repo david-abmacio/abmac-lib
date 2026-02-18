@@ -146,6 +146,15 @@ pub struct ProducerSpout<S, F> {
     next_id: Arc<AtomicUsize>,
 }
 
+impl<S, F> core::fmt::Debug for ProducerSpout<S, F> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ProducerSpout")
+            .field("producer_id", &self.producer_id)
+            .field("initialized", &self.inner.is_some())
+            .finish()
+    }
+}
+
 impl<S, F: Clone> Clone for ProducerSpout<S, F> {
     fn clone(&self) -> Self {
         use core::sync::atomic::Ordering;

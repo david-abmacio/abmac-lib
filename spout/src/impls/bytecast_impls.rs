@@ -14,6 +14,7 @@ use crate::Spout;
 ///
 /// Compose with `ProducerSpout` for tagged, framed output.
 #[must_use]
+#[derive(Debug)]
 pub struct FramedSpout<S> {
     inner: S,
     producer_id: usize,
@@ -189,6 +190,11 @@ impl<T: ToBytes, S> ToBytes for BatchSpout<T, S> {
 pub fn decode_batch<T: FromBytes>(bytes: &[u8]) -> Result<(usize, Vec<T>), BytesError> {
     let mut reader = ByteReader::new(bytes);
     let threshold: usize = reader.read()?;
+    if threshold == 0 {
+        return Err(BytesError::InvalidData {
+            message: "batch threshold must be at least 1",
+        });
+    }
     let buffer: Vec<T> = reader.read()?;
     let trailing = reader.remaining().len();
     if trailing != 0 {

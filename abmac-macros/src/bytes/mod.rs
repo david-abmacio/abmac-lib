@@ -54,6 +54,23 @@ pub fn resolve_discriminants(data: &syn::DataEnum) -> syn::Result<Vec<i128>> {
         values.push(next);
         next = next.wrapping_add(1);
     }
+
+    let mut seen = std::collections::HashMap::with_capacity(values.len());
+    for (i, &val) in values.iter().enumerate() {
+        if let Some(&prev_idx) = seen.get(&val) {
+            let dup = &data.variants[i];
+            let prev = &data.variants[prev_idx];
+            return Err(syn::Error::new_spanned(
+                dup,
+                format!(
+                    "discriminant value {} is shared with variant `{}`",
+                    val, prev.ident,
+                ),
+            ));
+        }
+        seen.insert(val, i);
+    }
+
     Ok(values)
 }
 

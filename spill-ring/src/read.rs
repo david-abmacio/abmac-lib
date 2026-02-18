@@ -17,6 +17,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         if head == tail {
             return None;
         }
+        // SAFETY: Slot at head is initialized (head != tail). SpillRing is !Sync,
+        // so &self proves single-context access — no concurrent mutation.
         Some(unsafe {
             let slot = &self.buffer[head & (N - 1)];
             (*slot.data.get()).assume_init_ref()
@@ -33,6 +35,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             return None;
         }
         let idx = tail.wrapping_sub(1) & (N - 1);
+        // SAFETY: Slot at tail-1 is initialized (head != tail). SpillRing is !Sync,
+        // so &self proves single-context access.
         Some(unsafe {
             let slot = &self.buffer[idx];
             (*slot.data.get()).assume_init_ref()
@@ -50,6 +54,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             return None;
         }
         let idx = head.wrapping_add(index) & (N - 1);
+        // SAFETY: Slot at head+index is initialized (index < len). SpillRing is
+        // !Sync, so &self proves single-context access.
         Some(unsafe {
             let slot = &self.buffer[idx];
             (*slot.data.get()).assume_init_ref()

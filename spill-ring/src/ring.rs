@@ -43,6 +43,8 @@ pub struct SpillRing<T, const N: usize, S: Spout<T, Error = core::convert::Infal
     sink: SpoutCell<S>,
 }
 
+// SAFETY: SpillRing uses interior mutability (Cell/UnsafeCell) for single-threaded
+// access only (!Sync). Sending to another thread is safe when T and S are Send.
 unsafe impl<T: Send, const N: usize, S: Spout<T, Error = core::convert::Infallible> + Send> Send
     for SpillRing<T, N, S>
 {
@@ -119,6 +121,9 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     /// Bring all ring slots into L1/L2 cache.
     fn warm(&mut self) {
         for i in 0..N {
+            // SAFETY: `&mut self` guarantees exclusive access. Writing zeros to
+            // MaybeUninit memory is always valid — this is cache prefetching, not
+            // initialization.
             unsafe {
                 let slot = &mut self.buffer[i];
                 let ptr = slot.data.get_mut() as *mut MaybeUninit<T> as *mut u8;
@@ -139,12 +144,18 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
         if tail.wrapping_sub(head) >= N {
             let evict_idx = head & (N - 1);
+            // SAFETY: Slot at head is initialized (pushed earlier). assume_init_read
+            // moves the value out; head is advanced immediately after.
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store(head.wrapping_add(1));
+            // SAFETY: SpillRing is !Sync, so &self proves single-context access.
+            // No &mut S alias can exist because that requires &mut self.
             let _ = unsafe { self.sink.get_mut_unchecked().send(evicted) };
         }
 
         let idx = tail & (N - 1);
+        // SAFETY: Slot at tail is uninitialized (or was previously read out).
+        // write() does not drop the previous value.
         unsafe { (*self.buffer[idx].data.get()).write(item) };
         self.tail.store(tail.wrapping_add(1));
     }
@@ -157,12 +168,14 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
         if tail.wrapping_sub(head) >= N {
             let evict_idx = head & (N - 1);
+            // SAFETY: Slot at head is initialized. assume_init_read moves value out.
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(1));
             let _ = self.sink.get_mut().send(evicted);
         }
 
         let idx = tail & (N - 1);
+        // SAFETY: Slot at tail is uninitialized. write() does not drop previous value.
         unsafe { (*self.buffer[idx].data.get()).write(item) };
         self.tail.store_mut(tail.wrapping_add(1));
     }
@@ -179,6 +192,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         }
 
         let idx = head & (N - 1);
+        // SAFETY: Slot at head is initialized (head != tail). assume_init_read moves value out.
         let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
         self.head.store_mut(head.wrapping_add(1));
         Some(item)
@@ -207,6 +221,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             let len = tail.wrapping_sub(head);
             if len > 0 {
                 let h = head;
+                // SAFETY: Slots [head..tail) are initialized. Each index is consumed once.
                 let _ = self.sink.get_mut().send_all((0..len).map(|i| unsafe {
                     (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
                 }));
@@ -230,6 +245,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         if keep.len() > free {
             let evict_count = keep.len() - free;
             let h = head;
+            // SAFETY: Slots [head..head+evict_count) are initialized. Each consumed once.
             let _ = self
                 .sink
                 .get_mut()
@@ -244,6 +260,10 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         let space_to_end = N - tail_idx;
         let count = keep.len();
 
+        // SAFETY: Destination slots are uninitialized (evicted above or never written).
+        // T: Copy, so memcpy is valid. Slot<T> is #[repr(transparent)] over
+        // UnsafeCell<MaybeUninit<T>>, so data.get() yields a valid *mut T destination.
+        // Source and destination do not overlap (stack slice vs ring buffer).
         unsafe {
             let dst = self.buffer[tail_idx].data.get() as *mut T;
             if count <= space_to_end {
@@ -293,6 +313,9 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         let head_idx = head & (N - 1);
         let to_end = N - head_idx;
 
+        // SAFETY: Slots [head..head+count) are initialized. T: Copy, so memcpy is
+        // valid. Slot<T> is #[repr(transparent)], so data.get() yields valid *const T.
+        // Source (ring buffer) and destination (caller's buf) do not overlap.
         unsafe {
             let src = self.buffer[head_idx].data.get() as *const T;
             let dst = buf.as_mut_ptr() as *mut T;
@@ -335,6 +358,9 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         let sink = self.sink.get_mut();
         for i in 0..count {
             let idx = head.wrapping_add(i) & (N - 1);
+            // SAFETY: Slot at idx is initialized (head..tail range). assume_init_read
+            // moves the value out; head is advanced immediately after each send for
+            // panic safety.
             let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(i + 1));
             let _ = sink.send(item);
@@ -358,6 +384,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         }
 
         let idx = head & (N - 1);
+        // SAFETY: Slot at head is initialized (head != tail). assume_init_read moves
+        // value out. SpillRing is !Sync, so &self proves single-context access.
         let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
         self.head.store(head.wrapping_add(1));
         Some(item)
@@ -535,6 +563,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> RingProd
             return Err(crate::PushError::Full(item));
         }
 
+        // SAFETY: Ring is not full (checked above). Slot at tail is uninitialized.
+        // write() does not drop the previous value.
         unsafe {
             let slot = &self.buffer[tail & (N - 1)];
             (*slot.data.get()).write(item);

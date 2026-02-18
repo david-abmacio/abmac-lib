@@ -36,6 +36,9 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Iter
         }
         let idx = self.head.wrapping_add(self.pos) & (N - 1);
         self.pos += 1;
+        // SAFETY: `ring` is a shared reference valid for 'a. Slot at idx is
+        // initialized (pos < len, where len = tail - head at construction).
+        // We only yield shared references, so no aliasing violation.
         Some(unsafe {
             let slot = &self.ring.buffer[idx];
             (*slot.data.get()).assume_init_ref()

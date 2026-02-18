@@ -137,7 +137,12 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         }
     }
 
-    /// Bring all ring slots into L1/L2 cache.
+    /// Bring all ring slots into L1/L2 cache by writing zeros to each slot.
+    ///
+    /// This is a performance optimization, not initialization — the slots remain
+    /// logically uninitialized (`MaybeUninit`). The zero-write forces the OS to
+    /// back each page with physical memory and pulls cache lines into L1/L2,
+    /// avoiding page faults and cache misses on the first real `push`.
     fn warm(&mut self) {
         for i in 0..N {
             // SAFETY: `&mut self` guarantees exclusive access. Writing zeros to
@@ -363,9 +368,13 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
     /// Flush all items to spout. Returns count flushed.
     ///
+    /// Items are **consumed** (moved out of the ring), not peeked — after flush
+    /// the ring is empty.
+    ///
     /// Panic-safe: head is advanced after each item is sent, so a panic
     /// in the spout will not cause double-reads during drop.
     #[inline]
+    #[must_use]
     pub fn flush(&mut self) -> usize {
         let head = self.head.load_mut();
         let tail = self.tail.load_mut();

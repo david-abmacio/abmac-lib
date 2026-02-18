@@ -4,12 +4,18 @@ pub trait Spout<T> {
     type Error;
 
     /// Consume an item.
+    ///
+    /// # Errors
+    /// Returns an error if the item could not be consumed.
     fn send(&mut self, item: T) -> Result<(), Self::Error>;
 
     /// Consume multiple items from an iterator.
     ///
     /// Default implementation calls `send` for each item.
     /// Implementors can override for batch optimizations.
+    ///
+    /// # Errors
+    /// Returns an error if any item could not be consumed.
     #[inline]
     fn send_all(&mut self, items: impl Iterator<Item = T>) -> Result<(), Self::Error> {
         for item in items {
@@ -19,6 +25,9 @@ pub trait Spout<T> {
     }
 
     /// Flush buffered data.
+    ///
+    /// # Errors
+    /// Returns an error if the flush operation fails.
     #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
         Ok(())
@@ -43,6 +52,6 @@ pub struct FlushFn<F>(pub F);
 impl<F: FnMut()> Flush for FlushFn<F> {
     #[inline]
     fn flush(&mut self) {
-        (self.0)()
+        (self.0)();
     }
 }

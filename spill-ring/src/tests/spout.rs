@@ -40,7 +40,7 @@ fn batch_sink_with_ring_chain() {
     assert!(batches.iter().all(|b| b.len() == 100));
 
     // Total evicted items should be 0..996 (first 996 of 1000)
-    let total_evicted: i32 = batches.iter().map(|b| b.len() as i32).sum();
+    let total_evicted: usize = batches.iter().map(Vec::len).sum();
     assert_eq!(total_evicted, 900); // 9 * 100 flushed so far
 
     // Ring should still have last 4 items

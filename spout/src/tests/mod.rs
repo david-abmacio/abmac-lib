@@ -166,6 +166,7 @@ fn reduce_spout_reduces_batches() {
 
 #[test]
 fn reduce_spout_flush_partial() {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     let mut s = ReduceSpout::new(5, |batch: Vec<i32>| batch.len() as i32, CollectSpout::new());
 
     let _ = s.send(1);
@@ -183,7 +184,7 @@ fn reduce_spout_type_transform() {
     // Transform i32 -> String
     let mut s = ReduceSpout::new(
         2,
-        |batch: Vec<i32>| std::format!("{:?}", batch),
+        |batch: Vec<i32>| std::format!("{batch:?}"),
         CollectSpout::<String>::new(),
     );
 

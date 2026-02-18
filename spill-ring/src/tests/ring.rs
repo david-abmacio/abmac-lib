@@ -97,7 +97,7 @@ fn iter_mut() {
     ring.push(2);
     ring.push(3);
 
-    for item in ring.iter_mut() {
+    for item in &mut ring {
         *item *= 10;
     }
 
@@ -114,7 +114,7 @@ fn flush_clears_buffer() {
     ring.push(2);
     ring.push(3);
 
-    ring.flush();
+    let _ = ring.flush();
 
     assert!(ring.is_empty());
     assert_eq!(ring.sink().items(), vec![1, 2, 3]);
@@ -646,7 +646,7 @@ fn iter_mut_after_wraparound() {
     }
     // Ring contains [2, 3, 4, 5] with wrapped indices
 
-    for item in ring.iter_mut() {
+    for item in &mut ring {
         *item *= 10;
     }
 

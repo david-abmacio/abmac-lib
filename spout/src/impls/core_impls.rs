@@ -32,6 +32,7 @@ impl<T> CollectSpout<T> {
     }
 
     /// Get collected items.
+    #[must_use]
     pub fn items(&self) -> &[T] {
         &self.items
     }
@@ -42,6 +43,7 @@ impl<T> CollectSpout<T> {
     }
 
     /// Consume spout and return collected items.
+    #[must_use]
     pub fn into_items(self) -> Vec<T> {
         self.items
     }
@@ -151,7 +153,7 @@ impl<S, F> core::fmt::Debug for ProducerSpout<S, F> {
         f.debug_struct("ProducerSpout")
             .field("producer_id", &self.producer_id)
             .field("initialized", &self.inner.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

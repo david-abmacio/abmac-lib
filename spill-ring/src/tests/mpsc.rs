@@ -24,7 +24,7 @@ fn basic_mpsc() {
     consumer.drain(&mut sink);
 
     let mut items = sink.into_items();
-    items.sort();
+    items.sort_unstable();
     assert_eq!(items, std::vec![1, 2, 10, 20]);
 }
 
@@ -153,7 +153,7 @@ mod worker_pool_tests {
         consumer.drain(&mut sink);
 
         let mut ids = sink.into_items();
-        ids.sort();
+        ids.sort_unstable();
         assert_eq!(ids, vec![0, 1, 2, 3]);
     }
 
@@ -237,7 +237,7 @@ fn with_consumer_and_collect() {
     consumer.drain(&mut sink);
 
     let mut items = sink.into_items();
-    items.sort();
+    items.sort_unstable();
     assert_eq!(items, std::vec![1, 2, 10, 100]);
 
     assert!(consumer.is_empty());

@@ -4,7 +4,7 @@ use bytecast::{ByteCursor, ByteReader, BytesError, FromBytes, ToBytes};
 
 use crate::Spout;
 
-/// Prepends framing headers (producer_id, byte length, payload) before forwarding.
+/// Prepends framing headers (`producer_id`, byte length, payload) before forwarding.
 ///
 /// Each item is serialized via `ToBytes`, then wrapped in a frame:
 /// `[producer_id: usize] [payload_len: u32 (4 bytes)] [payload bytes]`
@@ -143,14 +143,17 @@ impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
 ///
 /// Returns `(producer_id, item)` from the framed bytes. Validates that the
 /// declared payload length matches the remaining frame bytes.
+///
+/// # Errors
+/// Returns an error if the frame is malformed or the payload cannot be decoded.
 pub fn decode_frame<T: FromBytes>(frame: &[u8]) -> Result<(usize, T), BytesError> {
     let mut reader = ByteReader::new(frame);
     let producer_id: usize = reader.read()?;
-    let payload_len: u32 = reader.read()?;
+    let payload_len: usize = reader.read::<u32>()? as usize;
     let remaining = reader.remaining();
-    if remaining.len() != payload_len as usize {
+    if remaining.len() != payload_len {
         return Err(BytesError::UnexpectedEof {
-            needed: payload_len as usize,
+            needed: payload_len,
             available: remaining.len(),
         });
     }
@@ -189,6 +192,9 @@ impl<T: ToBytes, S> ToBytes for BatchSpout<T, S> {
 /// Returns `(threshold, buffered_items)` from the bytes produced by
 /// `BatchSpout::to_bytes()`. The caller reconstructs the `BatchSpout`
 /// with their own sink and uses these values to restore state.
+///
+/// # Errors
+/// Returns an error if the bytes are malformed or items cannot be decoded.
 pub fn decode_batch<T: FromBytes>(bytes: &[u8]) -> Result<(usize, Vec<T>), BytesError> {
     let mut reader = ByteReader::new(bytes);
     let threshold: usize = reader.read()?;

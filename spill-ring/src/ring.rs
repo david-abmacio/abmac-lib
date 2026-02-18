@@ -81,6 +81,7 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
     ///     .cold()
     ///     .build();
     /// ```
+    #[must_use]
     pub fn builder() -> crate::builder::SpillRingBuilder<T, N> {
         crate::builder::SpillRingBuilder::new()
     }
@@ -150,7 +151,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             // initialization.
             unsafe {
                 let slot = &mut self.buffer[i];
-                let ptr = slot.data.get_mut() as *mut MaybeUninit<T> as *mut u8;
+                let ptr: *mut u8 = core::ptr::from_mut(slot.data.get_mut()).cast();
                 core::ptr::write_bytes(ptr, 0, core::mem::size_of::<MaybeUninit<T>>());
             }
         }
@@ -289,14 +290,14 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         // UnsafeCell<MaybeUninit<T>>, so data.get() yields a valid *mut T destination.
         // Source and destination do not overlap (stack slice vs ring buffer).
         unsafe {
-            let dst = self.buffer[tail_idx].data.get() as *mut T;
+            let dst = self.buffer[tail_idx].data.get().cast::<T>();
             if count <= space_to_end {
                 core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, count);
             } else {
                 core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, space_to_end);
                 core::ptr::copy_nonoverlapping(
                     keep.as_ptr().add(space_to_end),
-                    self.buffer[0].data.get() as *mut T,
+                    self.buffer[0].data.get().cast::<T>(),
                     count - space_to_end,
                 );
             }
@@ -341,14 +342,14 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         // valid. Slot<T> is #[repr(transparent)], so data.get() yields valid *const T.
         // Source (ring buffer) and destination (caller's buf) do not overlap.
         unsafe {
-            let src = self.buffer[head_idx].data.get() as *const T;
-            let dst = buf.as_mut_ptr() as *mut T;
+            let src: *const T = self.buffer[head_idx].data.get().cast();
+            let dst = buf.as_mut_ptr().cast::<T>();
             if count <= to_end {
                 core::ptr::copy_nonoverlapping(src, dst, count);
             } else {
                 core::ptr::copy_nonoverlapping(src, dst, to_end);
                 core::ptr::copy_nonoverlapping(
-                    self.buffer[0].data.get() as *const T,
+                    self.buffer[0].data.get().cast::<T>(),
                     dst.add(to_end),
                     count - to_end,
                 );
@@ -494,7 +495,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     }
 }
 
-/// Draining iterator over a SpillRing.
+/// Draining iterator over a `SpillRing`.
 pub struct Drain<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> {
     ring: &'a mut SpillRing<T, N, S>,
 }
@@ -537,7 +538,7 @@ impl<T, const N: usize> Default for SpillRing<T, N, DropSpout> {
     }
 }
 
-/// SpillRing can act as a Spout, enabling ring chaining (ring1 -> ring2).
+/// `SpillRing` can act as a `Spout`, enabling ring chaining (ring1 -> ring2).
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Spout<T>
     for SpillRing<T, N, S>
 {

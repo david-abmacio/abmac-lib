@@ -1,6 +1,6 @@
-//! Read accessors for SpillRing.
+//! Read accessors for `SpillRing`.
 //!
-//! SpillRing is `!Sync`, so `&self` receivers are safe — no concurrent
+//! `SpillRing` is `!Sync`, so `&self` receivers are safe — no concurrent
 //! producer can invalidate references.
 
 use crate::iter::SpillRingIter;

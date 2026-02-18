@@ -62,12 +62,12 @@ fn ring_chaining_flush_cascades() {
     ring1.push(3);
 
     // Flush ring1 -> items go to ring2
-    ring1.flush();
+    let _ = ring1.flush();
     assert!(ring1.is_empty());
     assert_eq!(ring1.sink().len(), 3);
 
     // Flush ring2 -> items go to final_sink
-    ring1.sink_mut().flush();
+    let _ = ring1.sink_mut().flush();
     assert!(ring1.sink().is_empty());
     assert_eq!(ring1.sink_mut().sink().items(), vec![1, 2, 3]);
 }

@@ -1,4 +1,4 @@
-//! Core implementation for spill_ring.
+//! Core implementation for `spill_ring`.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]

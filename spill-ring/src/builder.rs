@@ -60,6 +60,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     /// By default, the builder warms the ring (touches all slots to pull them
     /// into L1/L2 cache). Use this for constrained environments where the
     /// warming overhead is unacceptable.
+    #[must_use]
     pub fn cold(mut self) -> Self {
         self.warm = false;
         self

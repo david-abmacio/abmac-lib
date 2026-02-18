@@ -1,4 +1,4 @@
-//! Iterators for SpillRing.
+//! Iterators for `SpillRing`.
 
 use crate::ring::SpillRing;
 use spout::Spout;
@@ -90,7 +90,7 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
         let len = ring.len();
         let head = ring.head.load();
         Self {
-            ring: ring as *mut _,
+            ring: core::ptr::from_mut(ring),
             pos: 0,
             len,
             head,

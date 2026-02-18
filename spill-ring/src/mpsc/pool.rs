@@ -124,7 +124,7 @@ fn worker_loop<T, const N: usize, S, F, A>(
     sink: S,
     worker_id: usize,
     work: F,
-    ctx: WorkerCtx<A>,
+    ctx: &WorkerCtx<A>,
 ) -> SpillRing<T, N, S>
 where
     S: Spout<T, Error = core::convert::Infallible>,
@@ -158,6 +158,7 @@ where
     F: Fn(&SpillRing<T, N, S>, usize, &A) + Send + Clone + 'static,
     A: Sync + 'static,
 {
+    #[allow(clippy::needless_pass_by_value)] // sink is cloned per-worker, consumed by move
     fn start(num_workers: usize, sink: S, work: F) -> Self {
         let ready = Arc::new(SpinBarrier::new(num_workers + 1));
         let start = Arc::new(SpinBarrier::new(num_workers + 1));
@@ -177,7 +178,7 @@ where
             let handle = thread::spawn({
                 let sink = sink.clone();
                 let work = work.clone();
-                move || worker_loop(sink, worker_id, work, ctx)
+                move || worker_loop(sink, worker_id, work, &ctx)
             });
             handles.push(Some(handle));
         }
@@ -205,6 +206,7 @@ where
 {
     /// Get the number of workers in the pool.
     #[inline]
+    #[must_use]
     pub fn num_rings(&self) -> usize {
         self.num_workers
     }
@@ -218,7 +220,7 @@ where
     pub fn run(&mut self, args: &A) {
         // Set args pointer before triggering start barrier
         self.args_ptr
-            .store(args as *const A as *mut A, Ordering::Release);
+            .store(core::ptr::from_ref(args).cast_mut(), Ordering::Release);
         self.start_barrier.wait();
         self.done_barrier.wait();
     }
@@ -226,6 +228,7 @@ where
     /// Convert the pool into a [`Consumer`] for draining all rings.
     ///
     /// Signals shutdown, joins all threads, and collects their rings.
+    #[must_use]
     pub fn into_consumer(mut self) -> Consumer<T, N, S> {
         let rings = self.shutdown_and_join();
         let mut consumer = Consumer::new();
@@ -237,7 +240,7 @@ where
 
     /// Signal shutdown and join all worker threads, returning their rings.
     fn shutdown_and_join(&mut self) -> Vec<SpillRing<T, N, S>> {
-        if !self.handles.iter().any(|h| h.is_some()) {
+        if !self.handles.iter().any(Option::is_some) {
             return Vec::new();
         }
         self.shutdown.store(true, Ordering::Relaxed);

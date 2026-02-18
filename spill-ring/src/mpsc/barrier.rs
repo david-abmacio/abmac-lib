@@ -19,7 +19,7 @@ pub(crate) struct SpinBarrier {
 impl SpinBarrier {
     pub(crate) fn new(num_threads: usize) -> Self {
         let cores = thread::available_parallelism()
-            .map(|n| n.get())
+            .map(std::num::NonZero::get)
             .unwrap_or(1);
         // Oversubscribed: yield immediately. Otherwise spin proportional
         // to headroom — more spare cores means less risk of starving.
@@ -28,6 +28,7 @@ impl SpinBarrier {
         } else {
             // 32 spins per spare core, capped at 256. Each PAUSE is ~5ns
             // on x86, so 256 spins ≈ 1.3µs — well under a scheduler tick.
+            #[allow(clippy::cast_possible_truncation)]
             ((cores - num_threads + 1) as u32 * 32).min(256)
         };
 

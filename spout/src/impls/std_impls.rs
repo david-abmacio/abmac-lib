@@ -15,11 +15,13 @@ impl<T> ChannelSpout<T> {
     }
 
     /// Get a reference to the underlying sender.
+    #[must_use]
     pub fn sender(&self) -> &mpsc::Sender<T> {
         &self.sender
     }
 
     /// Consume the spout and return the sender.
+    #[must_use]
     pub fn into_sender(self) -> mpsc::Sender<T> {
         self.sender
     }
@@ -70,11 +72,13 @@ impl<T> SyncChannelSpout<T> {
     }
 
     /// Get a reference to the underlying sender.
+    #[must_use]
     pub fn sender(&self) -> &mpsc::SyncSender<T> {
         &self.sender
     }
 
     /// Consume the spout and return the sender.
+    #[must_use]
     pub fn into_sender(self) -> mpsc::SyncSender<T> {
         self.sender
     }

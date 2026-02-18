@@ -41,18 +41,21 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Consumer
     }
 
     /// Get the number of producers/rings.
+    #[must_use]
     pub fn num_producers(&self) -> usize {
         self.rings.len()
     }
 
     /// Check if all rings are empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rings.iter().all(|r| r.is_empty())
+        self.rings.iter().all(SpillRing::is_empty)
     }
 
     /// Get total items across all rings.
+    #[must_use]
     pub fn len(&self) -> usize {
-        self.rings.iter().map(|r| r.len()).sum()
+        self.rings.iter().map(SpillRing::len).sum()
     }
 }
 

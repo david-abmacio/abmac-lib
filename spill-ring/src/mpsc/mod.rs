@@ -79,6 +79,7 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     ///     }
     /// });
     /// ```
+    #[must_use]
     #[allow(clippy::new_ret_no_self)]
     pub fn new(num_producers: usize) -> Vec<Producer<T, N>> {
         (0..num_producers).map(|_| Producer::new()).collect()
@@ -117,6 +118,7 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     /// let mut sink = CollectSpout::new();
     /// consumer.drain(&mut sink);
     /// ```
+    #[must_use]
     pub fn with_consumer(num_producers: usize) -> (Vec<Producer<T, N>>, Consumer<T, N>) {
         let producers = (0..num_producers).map(|_| Producer::new()).collect();
         (producers, Consumer::new())
@@ -143,6 +145,7 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     /// pool.run(&10_000);
     /// let consumer = pool.into_consumer();
     /// ```
+    #[must_use]
     #[cfg(feature = "std")]
     pub fn pool(num_workers: usize) -> PoolBuilder<T, N, DropSpout>
     where
@@ -173,6 +176,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible> + Clone> 
     ///     // Items flush to spout on drop
     /// }
     /// ```
+    #[allow(clippy::needless_pass_by_value)] // sink is cloned per-producer, consumed by move
     pub fn with_sink(num_producers: usize, sink: S) -> Vec<Producer<T, N, S>> {
         (0..num_producers)
             .map(|_| Producer::with_sink(sink.clone()))

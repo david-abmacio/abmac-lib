@@ -69,11 +69,15 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> core::it
 }
 
 /// Mutable iterator.
+///
+/// Stores a raw pointer to avoid creating `&mut T` through a shared reference.
+/// The lifetime `'a` is enforced via `PhantomData`.
 pub struct SpillRingIterMut<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> {
-    ring: &'a SpillRing<T, N, S>,
+    ring: *mut SpillRing<T, N, S>,
     pos: usize,
     len: usize,
     head: usize,
+    _marker: core::marker::PhantomData<&'a mut SpillRing<T, N, S>>,
 }
 
 impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
@@ -83,10 +87,11 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
         let len = ring.len();
         let head = ring.head.load();
         Self {
-            ring,
+            ring: ring as *mut _,
             pos: 0,
             len,
             head,
+            _marker: core::marker::PhantomData,
         }
     }
 }
@@ -103,8 +108,11 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Iter
         }
         let idx = self.head.wrapping_add(self.pos) & (N - 1);
         self.pos += 1;
+        // SAFETY: `ring` is a valid pointer derived from `&mut SpillRing` in `new()`.
+        // Each index is yielded exactly once (pos increments), so no aliasing occurs.
+        // The `UnsafeCell` in each slot permits mutable access through a raw pointer.
         Some(unsafe {
-            let slot = &self.ring.buffer[idx];
+            let slot = &(*self.ring).buffer[idx];
             &mut *(*slot.data.get()).as_mut_ptr()
         })
     }

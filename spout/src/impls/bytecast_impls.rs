@@ -82,6 +82,8 @@ impl<E: core::fmt::Display> core::fmt::Display for FramedSpoutError<E> {
     }
 }
 
+impl<E: core::fmt::Debug + core::fmt::Display> core::error::Error for FramedSpoutError<E> {}
+
 impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
     type Error = FramedSpoutError<S::Error>;
 

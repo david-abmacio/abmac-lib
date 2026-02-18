@@ -10,7 +10,7 @@ mod bytecast_spouts;
 
 use std::{vec, vec::Vec};
 
-use crate::{BatchSpout, CollectSpout, DropSpout, FnSpout, ReduceSpout, Spout, spout};
+use crate::{BatchSpout, CollectSpout, DropSpout, FlushFn, FnSpout, ReduceSpout, Spout, spout};
 
 #[test]
 fn drop_spout_accepts_items() {
@@ -69,9 +69,9 @@ fn fn_flush_spout_calls_both_closures() {
         |_: i32| {
             SEND_COUNT.fetch_add(1, Ordering::SeqCst);
         },
-        || {
+        FlushFn(|| {
             FLUSH_COUNT.fetch_add(1, Ordering::SeqCst);
-        },
+        }),
     );
 
     let _ = s.send(1);

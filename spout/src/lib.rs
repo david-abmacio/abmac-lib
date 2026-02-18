@@ -12,7 +12,7 @@ mod traits;
 mod tests;
 
 pub use impls::*;
-pub use traits::{Flush, Spout};
+pub use traits::{Flush, FlushFn, Spout};
 
 #[cfg(feature = "bytecast")]
 pub use bytecast::{FromBytes, FromBytesExt, ToBytes, ToBytesExt};

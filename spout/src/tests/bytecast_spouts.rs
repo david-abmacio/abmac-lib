@@ -5,7 +5,7 @@ use std::vec::Vec;
 
 use bytecast::{FromBytes, ToBytesExt};
 
-use crate::{BatchSpout, CollectSpout, FramedSpout, Spout, decode_frame};
+use crate::{BatchSpout, CollectSpout, FramedSpout, Spout, decode_batch, decode_frame};
 
 // --- FramedSpout tests ---
 
@@ -141,4 +141,99 @@ fn fn_spout_with_to_bytes_serialization() {
     let (v2, _) = u32::from_bytes(&serialized[4..8]).unwrap();
     assert_eq!(v1, 1);
     assert_eq!(v2, 2);
+}
+
+// --- decode_frame malformed input tests ---
+
+#[test]
+fn decode_frame_empty_input() {
+    let result = decode_frame::<u32>(&[]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_frame_truncated_header() {
+    // Only 4 bytes — not enough for producer_id (8) + payload_len (4)
+    let result = decode_frame::<u32>(&[0; 4]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_frame_payload_length_mismatch() {
+    // Valid header: producer_id=0 (8 bytes LE), payload_len=100 (4 bytes LE), but no payload
+    let mut buf = [0u8; 12];
+    // payload_len = 100 at offset 8
+    buf[8] = 100;
+    let result = decode_frame::<u32>(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_frame_trailing_bytes_rejected() {
+    // Build a valid frame, then append garbage
+    let mut s = FramedSpout::new(1, CollectSpout::<Vec<u8>>::new());
+    s.send(42u32).unwrap();
+    let mut frame = s.into_inner().into_items().remove(0);
+    frame.push(0xFF); // trailing garbage
+    let result = decode_frame::<u32>(&frame);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_frame_valid_roundtrip() {
+    let mut s = FramedSpout::new(99, CollectSpout::<Vec<u8>>::new());
+    s.send(12345u32).unwrap();
+    let frame = &s.inner().items()[0];
+    let (id, val) = decode_frame::<u32>(frame).unwrap();
+    assert_eq!(id, 99);
+    assert_eq!(val, 12345);
+}
+
+// --- decode_batch malformed input tests ---
+
+#[test]
+fn decode_batch_empty_input() {
+    let result = decode_batch::<u32>(&[]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_batch_zero_threshold_rejected() {
+    // threshold = 0 (8 bytes LE zeros) + empty vec (varint 0)
+    let mut buf = [0u8; 9];
+    buf[8] = 0; // varint 0 for empty vec
+    let result = decode_batch::<u32>(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_batch_trailing_bytes_rejected() {
+    let mut s: BatchSpout<u32, CollectSpout<Vec<u32>>> = BatchSpout::new(5, CollectSpout::new());
+    s.send(1).unwrap();
+    let mut bytes = s.to_vec().unwrap();
+    bytes.push(0xFF); // trailing garbage
+    let result = decode_batch::<u32>(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn decode_batch_valid_roundtrip() {
+    let mut s: BatchSpout<u32, CollectSpout<Vec<u32>>> = BatchSpout::new(10, CollectSpout::new());
+    s.send(1).unwrap();
+    s.send(2).unwrap();
+    s.send(3).unwrap();
+    let bytes = s.to_vec().unwrap();
+    let (threshold, buffer) = decode_batch::<u32>(&bytes).unwrap();
+    assert_eq!(threshold, 10);
+    assert_eq!(buffer, vec![1, 2, 3]);
+}
+
+#[test]
+fn decode_batch_oversized_vec_length() {
+    // threshold = 1 (valid), then a varint claiming u32::MAX elements
+    let mut buf = vec![0u8; 8]; // threshold = 0 in LE... wait, need threshold >= 1
+    buf[0] = 1; // threshold = 1 in LE (usize serialized as u64)
+    buf.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]); // varint u32::MAX
+    let result = decode_batch::<u32>(&buf);
+    assert!(result.is_err());
 }

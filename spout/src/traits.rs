@@ -36,9 +36,13 @@ impl Flush for () {
     fn flush(&mut self) {}
 }
 
-impl<F: FnMut()> Flush for F {
+/// Wraps a closure as a [`Flush`] implementation.
+#[must_use]
+pub struct FlushFn<F>(pub F);
+
+impl<F: FnMut()> Flush for FlushFn<F> {
     #[inline]
     fn flush(&mut self) {
-        self()
+        (self.0)()
     }
 }

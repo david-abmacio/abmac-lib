@@ -156,5 +156,11 @@ pub fn decode_batch<T: FromBytes>(bytes: &[u8]) -> Result<(usize, Vec<T>), Bytes
     let mut reader = ByteReader::new(bytes);
     let threshold: usize = reader.read()?;
     let buffer: Vec<T> = reader.read()?;
+    let trailing = reader.remaining().len();
+    if trailing != 0 {
+        return Err(BytesError::InvalidData {
+            message: "trailing bytes after batch payload",
+        });
+    }
     Ok((threshold, buffer))
 }

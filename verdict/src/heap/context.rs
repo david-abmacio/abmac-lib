@@ -295,7 +295,7 @@ impl<E, S: Status, Overflow: Spout<Frame, Error = core::convert::Infallible>>
     #[track_caller]
     pub fn assert_origin(self, module_prefix: &str) -> Self {
         debug_assert!(
-            self.frames.iter().any(|f| f.file.contains(module_prefix)),
+            self.frames.iter().any(|f| f.file().contains(module_prefix)),
             "missing provenance: expected frame from '{}'",
             module_prefix
         );
@@ -487,6 +487,8 @@ impl<
     }
 }
 
+/// Always returns `Context<E, Dynamic>` — the on-wire status is discarded.
+/// Use [`decode_context`] to restore the original status typestate.
 #[cfg(feature = "bytecast")]
 impl<E: bytecast::FromBytes + Actionable> bytecast::FromBytes for Context<E, Dynamic, DropSpout> {
     fn from_bytes(buf: &[u8]) -> Result<(Self, usize), bytecast::BytesError> {

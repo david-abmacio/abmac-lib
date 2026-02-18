@@ -2,7 +2,7 @@ use crate::{BytesError, FromBytes, ToBytes};
 
 const fn add_max_size(a: Option<usize>, b: Option<usize>) -> Option<usize> {
     match (a, b) {
-        (Some(a), Some(b)) => Some(a + b),
+        (Some(a), Some(b)) => a.checked_add(b),
         _ => None,
     }
 }

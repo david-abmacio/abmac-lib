@@ -92,10 +92,17 @@ impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
         self.buf.clear();
         self.buf.resize(FRAME_HEADER_SIZE + payload_size, 0);
 
-        // Write payload first to learn actual size
-        let payload_written = item
-            .to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])
-            .map_err(FramedSpoutError::Encode)?;
+        // Write payload, retrying once on undersized buffer
+        let payload_written = match item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..]) {
+            Ok(n) => n,
+            Err(BytesError::BufferTooSmall { .. }) => {
+                let exact = item.byte_len().unwrap_or(self.buf.len() * 2);
+                self.buf.resize(FRAME_HEADER_SIZE + exact, 0);
+                item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])
+                    .map_err(FramedSpoutError::Encode)?
+            }
+            Err(e) => return Err(FramedSpoutError::Encode(e)),
+        };
 
         // Validate payload fits in u32 length field
         let payload_len = u32::try_from(payload_written).map_err(|_| {

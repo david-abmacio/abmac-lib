@@ -1,51 +1,43 @@
-//! MPSC ring: multiple producers, single consumer.
+//! MPSC ring: multiple producers, single consumer (alloc-only API).
 //!
-//! Each producer owns its own SpillRing — zero contention on the hot path.
-//! After producers finish, their rings are collected into a consumer and
-//! drained.
+//! Each producer owns its own SpillRing — zero contention. After
+//! producers finish, their rings are reunited with the consumer
+//! and drained. No threads required.
 //!
-//! Run with: cargo run --example mpsc --features std
+//! This is the alloc-level API. For threaded workloads, use WorkerPool
+//! (see the worker_pool example).
+//!
+//! Run with: cargo run --example mpsc --features alloc
 
 use spill_ring::MpscRing;
 use spout::CollectSpout;
-use std::thread;
 
 fn main() {
     const NUM_PRODUCERS: usize = 4;
-    const ITEMS_PER_PRODUCER: u64 = 100_000;
 
-    // Create producers with a consumer handle for draining after work is done.
-    let (producers, mut consumer) = MpscRing::<u64, 256>::with_consumer(NUM_PRODUCERS);
+    let (producers, mut consumer) = MpscRing::<u64, 8>::with_consumer(NUM_PRODUCERS);
 
-    // Spawn producers — each runs at full speed on its own ring.
-    let finished: Vec<_> = thread::scope(|s| {
-        producers
-            .into_iter()
-            .enumerate()
-            .map(|(id, producer)| {
-                s.spawn(move || {
-                    for i in 0..ITEMS_PER_PRODUCER {
-                        producer.push(id as u64 * ITEMS_PER_PRODUCER + i);
-                    }
-                    producer // return ownership so we can collect the ring
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect()
-    });
+    // Each producer fills its own ring independently.
+    let finished: Vec<_> = producers
+        .into_iter()
+        .enumerate()
+        .map(|(id, producer)| {
+            for i in 0..20 {
+                producer.push(id as u64 * 100 + i);
+            }
+            producer
+        })
+        .collect();
 
-    // Reunite producers with consumer, then drain remaining ring contents.
+    // Reunite producers with consumer, then drain.
     consumer.collect(finished);
 
     let mut spout = CollectSpout::new();
     consumer.drain(&mut spout);
     let items = spout.into_items();
 
-    // Only the last 256 items per producer remain in each ring (earlier
-    // items were dropped by DropSpout on overflow). With 256-slot rings
-    // and 100k items, most items are evicted.
-    println!("Producers: {NUM_PRODUCERS}, items each: {ITEMS_PER_PRODUCER}");
-    println!("Drained from rings: {}", items.len());
+    // 8-slot rings hold at most 8 items each. With 20 pushes per producer,
+    // the oldest 12 per producer were evicted (dropped by DropSpout).
+    println!("Producers: {NUM_PRODUCERS}, ring capacity: 8");
+    println!("Pushed 20 items each, drained {} total", items.len());
 }

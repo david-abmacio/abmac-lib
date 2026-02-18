@@ -282,6 +282,100 @@ mod worker_pool_tests {
         // Worker 0: 1, 2, 3. Worker 1: 101, 102, 103.
         assert_eq!(items, vec![1, 2, 3, 101, 102, 103]);
     }
+
+    // --- Feature 1: Streaming Collection API ---
+
+    #[test]
+    fn dispatch_join_collect() {
+        // dispatch + join + collect should produce same results as run + into_consumer
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(id as u64 * 10000 + i);
+            }
+        });
+
+        pool.dispatch(&100);
+        pool.join().unwrap();
+
+        let mut sink = CollectSpout::new();
+        let count = pool.collect(&mut sink).unwrap();
+        assert_eq!(count, 400); // 4 workers * 100 items
+        assert_eq!(sink.items().len(), 400);
+    }
+
+    #[test]
+    fn collect_between_runs() {
+        // collect() picks up batches from previous run()
+        let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, count: &u64| {
+            for i in 0..*count {
+                ring.push(i);
+            }
+        });
+
+        pool.run(&50);
+
+        let mut sink = CollectSpout::new();
+        let count = pool.collect(&mut sink).unwrap();
+        assert_eq!(count, 100); // 2 workers * 50
+
+        // Second run should also work
+        pool.run(&30);
+        let count2 = pool.collect(&mut sink).unwrap();
+        assert_eq!(count2, 60);
+        assert_eq!(sink.items().len(), 160);
+    }
+
+    #[test]
+    fn collect_multiple_rounds_then_into_consumer() {
+        // collect() over 3 rounds, then into_consumer gets nothing extra
+        let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
+            ring.push(1);
+        });
+
+        let mut sink = CollectSpout::new();
+        for _ in 0..3 {
+            pool.dispatch(&());
+            pool.join().unwrap();
+            pool.collect(&mut sink).unwrap();
+        }
+        assert_eq!(sink.items().len(), 6); // 2 workers * 3 rounds
+
+        // into_consumer should get the final rings (empty since we collected)
+        let consumer = pool.into_consumer();
+        assert!(consumer.is_empty());
+    }
+
+    #[test]
+    fn collect_empty_slots_skipped() {
+        // collect() when no batches published yet returns 0
+        let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
+            ring.push(1);
+        });
+
+        // No dispatch yet — slots are empty
+        let mut sink = CollectSpout::new();
+        let count = pool.collect(&mut sink).unwrap();
+        assert_eq!(count, 0);
+        assert!(sink.items().is_empty());
+    }
+
+    #[test]
+    fn collect_propagates_spout_error() {
+        use std::sync::mpsc;
+
+        let mut pool = MpscRing::<u64, 256>::pool(1).spawn(|ring, _id, _args: &()| {
+            ring.push(42);
+        });
+
+        pool.run(&());
+
+        // ChannelSpout with a dropped receiver will error on send
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let mut spout = spout::ChannelSpout::new(tx);
+        let result = pool.collect(&mut spout);
+        assert!(result.is_err());
+    }
 }
 
 // --- Missing coverage tests ---

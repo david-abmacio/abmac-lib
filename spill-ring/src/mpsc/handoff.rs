@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use crate::SpillRing;
 use spout::Spout;
@@ -31,6 +31,9 @@ pub(crate) struct HandoffSlot<T, const N: usize, S: Spout<T, Error = core::conve
     batch: AtomicPtr<SpillRing<T, N, S>>,
     /// Recycled empty ring, or null. Consumer -> Producer.
     recycle: AtomicPtr<SpillRing<T, N, S>>,
+    /// Batch sequence number. Stamped by main thread before dispatch,
+    /// read by consumer during collect(). Not accessed by workers.
+    batch_seq: AtomicU64,
 }
 
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> HandoffSlot<T, N, S> {
@@ -39,6 +42,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> HandoffS
         Self {
             batch: AtomicPtr::new(ptr::null_mut()),
             recycle: AtomicPtr::new(ptr::null_mut()),
+            batch_seq: AtomicU64::new(0),
         }
     }
 
@@ -99,6 +103,16 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> HandoffS
             // Ownership transfers to us via the atomic swap.
             Some(unsafe { Box::from_raw(ptr) })
         }
+    }
+
+    /// Main thread: stamp this slot's batch sequence number before dispatch.
+    #[inline]
+    pub(crate) fn stamp_seq(&self, seq: u64) {
+        // Ordering: Release — publishes seq before go signal wakes worker.
+        // The go signal's Release provides the cross-thread fence; this
+        // Release ensures the seq value is visible when the consumer later
+        // reads the batch with Acquire.
+        self.batch_seq.store(seq, Ordering::Release);
     }
 }
 

@@ -27,7 +27,7 @@ use super::sync;
 /// The pointed-to data must outlive all threads that receive this pointer.
 /// `WorkerPool` guarantees this: `shutdown_and_join` joins all threads
 /// before the `Box` allocations backing these pointers are dropped.
-struct SendPtr<T>(*const T);
+pub(crate) struct SendPtr<T>(pub(crate) *const T);
 
 // SAFETY: The pointer targets heap-allocated data (`Box<[...]>`, `Box<AtomicPtr>`)
 // owned by `WorkerPool`. All worker threads are joined in `shutdown_and_join`
@@ -152,6 +152,8 @@ where
     args_ptr: Box<AtomicPtr<A>>,
     /// Pre-computed spin limit for adaptive spin-then-yield polling.
     spin_limit: u32,
+    /// Monotonic batch sequence counter, incremented on each dispatch.
+    batch_seq: u64,
     _marker: PhantomData<F>,
 }
 
@@ -234,6 +236,7 @@ where
             signals,
             args_ptr,
             spin_limit,
+            batch_seq: 0,
             _marker: PhantomData,
         }
     }
@@ -336,6 +339,88 @@ where
         self.num_workers
     }
 
+    /// Non-blocking: stamp batch sequence, store args, signal all workers.
+    ///
+    /// Returns immediately. Call [`join()`](Self::join) to wait for
+    /// completion, or [`collect()`](Self::collect) to drain available
+    /// results without waiting.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any worker has previously panicked.
+    pub fn dispatch(&mut self, args: &A) {
+        self.check_panicked()
+            .expect("worker panicked in previous round");
+
+        let seq = self.batch_seq;
+        self.batch_seq += 1;
+
+        // Stamp batch sequence on all slots before signaling go.
+        for slot in self.slots.iter() {
+            slot.stamp_seq(seq);
+        }
+
+        // Ordering: Release — publishes args data before workers read it.
+        self.args_ptr
+            .store(core::ptr::from_ref(args).cast_mut(), Ordering::Release);
+
+        for sig in self.signals.iter() {
+            sig.signal_go();
+        }
+    }
+
+    /// Block until all workers signal done. Detects panics.
+    ///
+    /// After `join()` returns, all handoff slots contain published batches
+    /// ready for [`collect()`](Self::collect).
+    pub fn join(&mut self) -> Result<(), WorkerPanic> {
+        // Poll done signals with adaptive spin-then-yield.
+        // Also check for panicked workers to avoid hanging.
+        sync::spin_wait(self.spin_limit, || self.all_done_or_panicked());
+
+        // Check if a worker panicked during this round.
+        self.check_panicked()?;
+
+        // Reset done flags for the next round.
+        for sig in self.signals.iter() {
+            sig.clear_done();
+        }
+
+        Ok(())
+    }
+
+    /// Collect all available batches from handoff slots into a spout.
+    ///
+    /// Non-blocking: iterates each slot, takes any published batch (Acquire),
+    /// drains items into `out`, then recycles the empty ring (Release).
+    /// Slots where the worker hasn't published yet are skipped.
+    ///
+    /// Returns the total number of items drained across all slots.
+    ///
+    /// Can be called:
+    /// - After `dispatch()` but before `join()` (streaming collection)
+    /// - After `join()` (all batches available)
+    /// - Between `run()` calls (collect previous round's batches)
+    ///
+    /// # Ring Recycling
+    ///
+    /// Empty rings are offered back to workers via `offer_recycle()`. If the
+    /// worker hasn't taken the previous recycled ring, the old one is dropped.
+    /// This only occurs when the consumer collects faster than workers produce
+    /// (consumer is not the bottleneck).
+    pub fn collect<Out: Spout<T>>(&mut self, out: &mut Out) -> Result<usize, Out::Error> {
+        let mut total = 0usize;
+        for slot in self.slots.iter() {
+            if let Some(mut ring) = slot.collect() {
+                let count = ring.len();
+                out.send_all(ring.drain())?;
+                slot.offer_recycle(ring);
+                total += count;
+            }
+        }
+        Ok(total)
+    }
+
     /// Run the work function on all workers with the given arguments.
     ///
     /// Each worker receives a shared reference to `args`. Blocks until
@@ -360,32 +445,8 @@ where
     /// After a worker panic, the pool is in a degraded state — further
     /// calls will return `Err` for the same worker.
     pub fn try_run(&mut self, args: &A) -> Result<(), WorkerPanic> {
-        // Check for workers that panicked in a previous round.
-        self.check_panicked()?;
-
-        // Publish args pointer before signaling go.
-        // Ordering: Release — publishes args data before workers read it.
-        self.args_ptr
-            .store(core::ptr::from_ref(args).cast_mut(), Ordering::Release);
-
-        // Signal all workers to start.
-        for sig in self.signals.iter() {
-            sig.signal_go();
-        }
-
-        // Poll done signals with adaptive spin-then-yield.
-        // Also check for panicked workers to avoid hanging.
-        sync::spin_wait(self.spin_limit, || self.all_done_or_panicked());
-
-        // Check if a worker panicked during this round.
-        self.check_panicked()?;
-
-        // Reset done flags for the next round.
-        for sig in self.signals.iter() {
-            sig.clear_done();
-        }
-
-        Ok(())
+        self.dispatch(args);
+        self.join()
     }
 
     /// Convert the pool into a [`Consumer`] for draining all rings.

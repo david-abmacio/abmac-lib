@@ -13,10 +13,10 @@ categories = ["no-std", "rust-patterns"]
 
 [features]
 std = ["bytecast?/std"]
-bytecast = ["dep:bytecast", "dep:bytecast-macros", "bytecast/alloc"]
+bytecast = ["dep:bytecast", "bytecast/alloc", "bytecast/derive"]
 
 [dependencies]
 bytecast = { workspace = true, optional = true }
-bytecast-macros = { workspace = true, optional = true }
+
 
 [dev-dependencies]

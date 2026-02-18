@@ -25,7 +25,7 @@ pub use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};
 
 // Re-export derive macros when derive feature is enabled
 #[cfg(feature = "derive")]
-pub use bytecast_macros::{FromBytes as DeriveFromBytes, ToBytes as DeriveToBytes};
+pub use abmac_macros::{FromBytes as DeriveFromBytes, ToBytes as DeriveToBytes};
 
 #[cfg(feature = "alloc")]
 pub use serializer::{ByteCursor, ByteReader, ByteSerializer};

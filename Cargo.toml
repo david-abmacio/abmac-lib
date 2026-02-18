@@ -1,11 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["abmac-macros", "bytecast", "bytecast-macros", "bytecast-macros-impl", "pebble-macros", "spout", "spill-ring", "verdict", "pebble"]
+members = ["abmac-macros", "bytecast", "spout", "spill-ring", "verdict", "pebble"]
 
 [workspace.package]
 
 [workspace.dependencies]
 spout = { path = "./spout" }
 bytecast = { path = "./bytecast" }
-bytecast-macros = { path = "./bytecast-macros" }
-pebble-macros = { path = "./pebble-macros" }
+abmac-macros = { path = "./abmac-macros" }

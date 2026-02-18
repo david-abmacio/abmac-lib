@@ -1,3 +1,5 @@
+#![cfg(feature = "bytecast")]
+
 use bytecast::{FromBytes, ToBytesExt};
 
 #[derive(Debug, PartialEq, bytecast::DeriveToBytes, bytecast::DeriveFromBytes)]

@@ -7,10 +7,11 @@ name = "abmac-macros"
 version = "0.1.0"
 dependencies = [
  "bytecast",
- "bytecast-macros",
  "hashbrown 0.15.5",
  "pebble",
- "pebble-macros",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -71,32 +72,14 @@ checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 name = "bytecast"
 version = "1.0.0"
 dependencies = [
+ "abmac-macros",
  "base64",
- "bytecast-macros",
  "facet",
  "facet-json",
  "rkyv",
  "serde",
  "serde_json",
  "zerocopy",
-]
-
-[[package]]
-name = "bytecast-macros"
-version = "1.0.0"
-dependencies = [
- "bytecast",
- "bytecast-macros-impl",
- "syn",
-]
-
-[[package]]
-name = "bytecast-macros-impl"
-version = "1.0.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -593,24 +576,14 @@ dependencies = [
 name = "pebble"
 version = "0.1.0"
 dependencies = [
+ "abmac-macros",
  "bytecast",
  "hashbrown 0.15.5",
- "pebble-macros",
  "serde",
  "serde_json",
  "spill-ring",
  "spout",
  "verdict",
-]
-
-[[package]]
-name = "pebble-macros"
-version = "0.1.0"
-dependencies = [
- "bytecast-macros-impl",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -866,7 +839,6 @@ name = "spout"
 version = "1.0.0-rc.1"
 dependencies = [
  "bytecast",
- "bytecast-macros",
 ]
 
 [[package]]

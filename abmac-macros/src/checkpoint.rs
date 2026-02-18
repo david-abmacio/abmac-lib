@@ -88,8 +88,8 @@ fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     // Generate ToBytes + FromBytes via bytecast so BytecastSerializer works automatically.
-    let to_bytes_tokens = bytecast_macros_impl::bytes::derive_to_bytes_impl(input)?;
-    let from_bytes_tokens = bytecast_macros_impl::bytes::derive_from_bytes_impl(input)?;
+    let to_bytes_tokens = crate::bytes::derive_to_bytes_impl(input)?;
+    let from_bytes_tokens = crate::bytes::derive_from_bytes_impl(input)?;
 
     Ok(quote! {
         #checkpointable_impl

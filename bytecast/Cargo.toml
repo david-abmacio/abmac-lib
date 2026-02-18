@@ -12,7 +12,7 @@ keywords = ["bytes", "serialization", "zero-copy", "no_std", "embedded"]
 categories = ["encoding", "no-std", "embedded"]
 
 [dependencies]
-bytecast-macros = { path = "../bytecast-macros", optional = true }
+abmac-macros = { path = "../abmac-macros", default-features = false, features = ["bytecast"], optional = true }
 zerocopy = { version = "0.8", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
@@ -28,7 +28,7 @@ rkyv = { version = "0.8", features = ["bytecheck"] }
 [features]
 std = ["alloc", "zerocopy/std"]
 alloc = ["zerocopy/alloc"]
-derive = ["dep:bytecast-macros"]
+derive = ["dep:abmac-macros"]
 serde = ["dep:serde", "dep:base64", "alloc"]
 facet = ["dep:facet", "dep:base64", "alloc"]
 rkyv = ["dep:rkyv", "alloc"]

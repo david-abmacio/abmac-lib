@@ -58,6 +58,8 @@ mod tests;
 
 pub use hashbrown::HashMap;
 
+#[cfg(feature = "derive")]
+pub use abmac_macros::Checkpoint;
 #[cfg(debug_assertions)]
 pub use manager::DebugCold;
 #[cfg(feature = "std")]
@@ -69,8 +71,6 @@ pub use manager::{
     Missing, NoWarm, PebbleBuilder, PebbleManager, PebbleManagerError, PebbleStats,
     RecoverableColdTier, Result, TheoreticalValidation, VerificationResult, WarmCache, WarmTier,
 };
-#[cfg(feature = "derive")]
-pub use pebble_macros::Checkpoint;
 #[cfg(all(debug_assertions, feature = "std"))]
 pub use storage::DebugFileStorage;
 pub use storage::{

@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [features]
 default = ["derive"]
-derive = ["dep:pebble-macros"]
+derive = ["dep:abmac-macros"]
 std = ["spill-ring/std"]
 serde = ["bytecast/serde"]
 facet = ["bytecast/facet"]
@@ -16,7 +16,7 @@ rkyv = ["bytecast/rkyv"]
 [dependencies]
 bytecast = { path = "../bytecast", default-features = false, features = ["alloc", "derive"] }
 hashbrown = "0.15"
-pebble-macros = { path = "../pebble-macros", optional = true }
+abmac-macros = { path = "../abmac-macros", default-features = false, features = ["pebble"], optional = true }
 spill-ring = { path = "../spill-ring", default-features = false }
 spout = { path = "../spout" }
 verdict = { path = "../verdict", default-features = false }

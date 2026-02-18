@@ -1,3 +1,5 @@
+#![cfg(feature = "pebble")]
+
 use pebble::Checkpointable;
 
 #[derive(Clone, pebble::Checkpoint)]

@@ -3,11 +3,15 @@ name = "abmac-macros"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Umbrella re-export of ABMAC derive macros"
+description = "ABMAC derive macros: ToBytes, FromBytes, Checkpoint"
+
+[lib]
+proc-macro = true
 
 [dependencies]
-bytecast-macros = { path = "../bytecast-macros", optional = true }
-pebble-macros = { path = "../pebble-macros", optional = true }
+syn = { version = "2.0", features = ["full", "parsing"] }
+quote = "1.0"
+proc-macro2 = "1.0"
 
 [dev-dependencies]
 bytecast = { path = "../bytecast", features = ["derive", "alloc"] }
@@ -16,5 +20,5 @@ hashbrown = "0.15"
 
 [features]
 default = []
-bytecast = ["dep:bytecast-macros"]
-pebble = ["dep:pebble-macros"]
+bytecast = []
+pebble = []

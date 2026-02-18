@@ -370,39 +370,3 @@ fn test_result_max_size() {
     // max(1, 8) + 1 = 9
     assert_eq!(<core::result::Result<u8, u64>>::MAX_SIZE, Some(9));
 }
-
-// ViewBytes tests
-#[test]
-fn test_view_bytes_slice() {
-    let data = [1u8, 2, 3, 4, 5];
-    let view: &[u8] = ViewBytes::view(&data).unwrap();
-    assert_eq!(view, &[1, 2, 3, 4, 5]);
-}
-
-#[test]
-fn test_view_bytes_str() {
-    let data = b"hello";
-    let view: &str = ViewBytes::view(data).unwrap();
-    assert_eq!(view, "hello");
-}
-
-#[test]
-fn test_view_bytes_str_invalid_utf8() {
-    let data = [0xff, 0xfe]; // invalid UTF-8
-    let result: core::result::Result<&str, _> = ViewBytes::view(&data);
-    assert!(matches!(result, Err(BytesError::InvalidData { .. })));
-}
-
-#[test]
-fn test_view_bytes_array() {
-    let data = [1u8, 2, 3, 4, 5, 6, 7, 8];
-    let view: &[u8; 4] = ViewBytes::view(&data).unwrap();
-    assert_eq!(view, &[1, 2, 3, 4]);
-}
-
-#[test]
-fn test_view_bytes_array_too_short() {
-    let data = [1u8, 2];
-    let result: core::result::Result<&[u8; 4], _> = ViewBytes::view(&data);
-    assert!(matches!(result, Err(BytesError::UnexpectedEof { .. })));
-}

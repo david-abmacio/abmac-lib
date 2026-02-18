@@ -84,9 +84,7 @@ pub use bytecast::BytecastFacet;
 pub use bytecast::BytecastRkyv;
 #[cfg(feature = "serde")]
 pub use bytecast::BytecastSerde;
-pub use bytecast::{
-    ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes, ToBytesExt, ViewBytes,
-};
+pub use bytecast::{ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes, ToBytesExt};
 
 pub use spout::Spout;
 pub use strategy::{DAGPriorityMode, DAGStrategy, Strategy, TreeStrategy};

@@ -18,7 +18,7 @@ mod serializer;
 
 pub use error::{BytesError, Result};
 pub use impls::wrapper::ZeroCopyType;
-pub use traits::{FromBytes, FromBytesExt, ToBytes, ToBytesExt, ViewBytes};
+pub use traits::{FromBytes, FromBytesExt, ToBytes, ToBytesExt};
 
 // Re-export zerocopy derives for custom #[repr(C)] structs
 pub use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};

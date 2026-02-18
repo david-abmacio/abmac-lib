@@ -12,7 +12,7 @@ pub mod alloc;
 pub mod tuple;
 pub mod wrapper;
 
-use crate::{BytesError, FromBytes, ToBytes, ViewBytes};
+use crate::{BytesError, FromBytes, ToBytes};
 
 // bool - needs validation (only 0 or 1 valid)
 impl ToBytes for bool {
@@ -239,32 +239,5 @@ impl<T: FromBytes, E: FromBytes> FromBytes for Result<T, E> {
                 message: "Result discriminant must be 0 or 1",
             }),
         }
-    }
-}
-
-// ViewBytes implementations for zero-copy views
-impl<'a> ViewBytes<'a> for &'a [u8] {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        Ok(bytes)
-    }
-}
-
-impl<'a> ViewBytes<'a> for &'a str {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        core::str::from_utf8(bytes).map_err(|_| BytesError::InvalidData {
-            message: "invalid UTF-8",
-        })
-    }
-}
-
-impl<'a, const N: usize> ViewBytes<'a> for &'a [u8; N] {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        if bytes.len() < N {
-            return Err(BytesError::UnexpectedEof {
-                needed: N,
-                available: bytes.len(),
-            });
-        }
-        Ok(bytes[..N].try_into().unwrap())
     }
 }

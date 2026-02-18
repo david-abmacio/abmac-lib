@@ -24,12 +24,6 @@ pub trait FromBytes: Sized {
     fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError>;
 }
 
-/// Zero-copy view into serialized bytes.
-pub trait ViewBytes<'a>: Sized {
-    /// Create a view into the bytes without copying.
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError>;
-}
-
 /// Convenience methods for ToBytes types.
 pub trait ToBytesExt: ToBytes {
     /// Serialize to a new Vec.

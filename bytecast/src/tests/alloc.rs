@@ -2,9 +2,8 @@ use alloc::{borrow::Cow, string::String, vec, vec::Vec};
 
 use super::{
     ByteCursor, ByteReader, ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes,
-    ToBytesExt, ZeroCopyType,
+    ToBytesExt,
 };
-use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};
 
 #[test]
 fn test_byte_serializer_new() {
@@ -138,27 +137,30 @@ fn test_string_unicode() {
     assert_eq!(consumed, written);
 }
 
-// Test zerocopy-derived struct via blanket impl
-#[derive(ZcFromBytes, IntoBytes, Immutable, KnownLayout, Debug, PartialEq)]
-#[repr(C)]
-struct Point {
-    x: i32,
-    y: i32,
-}
+#[cfg(feature = "derive")]
+mod derive_tests {
+    use super::*;
+    use crate::{DeriveFromBytes, DeriveToBytes};
 
-impl ZeroCopyType for Point {}
+    #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
+    #[bytecast(crate = "crate")]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
 
-#[test]
-fn test_zerocopy_struct_roundtrip() {
-    let mut buf = [0u8; 8];
-    let value = Point { x: 100, y: -200 };
+    #[test]
+    fn test_derive_struct_roundtrip() {
+        let mut buf = [0u8; 8];
+        let value = Point { x: 100, y: -200 };
 
-    let written = value.to_bytes(&mut buf).unwrap();
-    assert_eq!(written, 8);
+        let written = value.to_bytes(&mut buf).unwrap();
+        assert_eq!(written, 8);
 
-    let (decoded, consumed) = Point::from_bytes(&buf).unwrap();
-    assert_eq!(decoded, value);
-    assert_eq!(consumed, 8);
+        let (decoded, consumed) = Point::from_bytes(&buf).unwrap();
+        assert_eq!(decoded, value);
+        assert_eq!(consumed, 8);
+    }
 }
 
 // ByteCursor tests

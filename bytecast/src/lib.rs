@@ -2,7 +2,7 @@
 //!
 //! This crate provides `ToBytes` and `FromBytes` traits for serializing
 //! Rust types to and from byte buffers. Fixed-size types are handled
-//! via zerocopy (internal), while variable-length types like `Option<T>`,
+//! via explicit little-endian encoding, while variable-length types like `Option<T>`,
 //! `Vec<T>`, and `String` have native implementations.
 #![no_std]
 
@@ -20,11 +20,7 @@ mod traits;
 mod serializer;
 
 pub use error::{BytesError, Result};
-pub use impls::wrapper::ZeroCopyType;
 pub use traits::{FromBytes, FromBytesExt, ToBytes, ToBytesExt};
-
-// Re-export zerocopy derives for custom #[repr(C)] structs
-pub use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};
 
 // Re-export derive macros when derive feature is enabled
 #[cfg(feature = "derive")]

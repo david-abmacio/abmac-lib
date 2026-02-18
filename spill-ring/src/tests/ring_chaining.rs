@@ -80,7 +80,7 @@ fn ring_chaining_drop_flushes_all() {
     let collected_clone = collected.clone();
 
     {
-        let final_sink = FnSpout(move |x: i32| {
+        let final_sink = FnSpout::new(move |x: i32| {
             collected_clone.lock().unwrap().push(x);
         });
         let ring2 = SpillRing::<i32, 4, _>::with_sink(final_sink);

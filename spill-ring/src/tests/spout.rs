@@ -10,7 +10,7 @@ fn fn_sink_receives_evicted() {
     let evicted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let evicted_clone = evicted.clone();
 
-    let ring = SpillRing::<i32, 2, _>::with_sink(FnSpout(move |x| {
+    let ring = SpillRing::<i32, 2, _>::with_sink(FnSpout::new(move |x| {
         evicted_clone.lock().unwrap().push(x);
     }));
 

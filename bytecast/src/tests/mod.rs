@@ -458,3 +458,42 @@ fn test_nonzero_u128_roundtrip() {
     assert_eq!(decoded, value);
     assert_eq!(consumed, 16);
 }
+
+// Little-endian wire format tests
+#[test]
+fn test_u16_le_layout() {
+    let mut buf = [0u8; 2];
+    0x0102u16.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x02, 0x01]);
+}
+
+#[test]
+fn test_u64_le_layout() {
+    let mut buf = [0u8; 8];
+    0x0102030405060708u64.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+}
+
+#[test]
+fn test_i16_negative_le_layout() {
+    let mut buf = [0u8; 2];
+    (-1i16).to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0xFF, 0xFF]);
+
+    (-256i16).to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x00, 0xFF]);
+}
+
+#[test]
+fn test_f32_le_layout() {
+    let mut buf = [0u8; 4];
+    core::f32::consts::PI.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, core::f32::consts::PI.to_le_bytes());
+}
+
+#[test]
+fn test_array_u16_le_layout() {
+    let mut buf = [0u8; 4];
+    [0x0102u16, 0x0304u16].to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x02, 0x01, 0x04, 0x03]);
+}

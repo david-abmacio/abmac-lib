@@ -5,7 +5,7 @@ Fast, simple byte serialization for Rust. Designed for embedded systems and perf
 ## Features
 
 - **no_std by default** - Works on embedded devices with no allocator
-- **Zero-copy for fixed-size types** - Uses [zerocopy](https://crates.io/crates/zerocopy) internally
+- **Portable wire format** - Little-endian encoding for all fixed-size types
 - **Simple API** - Just `ToBytes` and `FromBytes` traits
 - **Variable-length encoding** - Efficient varint encoding for `Vec<T>` and `String` lengths
 
@@ -45,7 +45,7 @@ Optional bridges let bytecast-serialized data flow through other serialization f
 | Feature  | Description |
 |----------|-------------|
 | `alloc`  | Enables `Vec<T>`, `String`, `VecDeque<T>`, and `Cow` support |
-| `std`    | Enables `HashMap`, `HashSet`, and full zerocopy std support (implies `alloc`) |
+| `std`    | Enables `HashMap`, `HashSet` (implies `alloc`) |
 | `derive` | Enables `DeriveToBytes` and `DeriveFromBytes` proc macros |
 | `serde`  | Enables `BytecastSerde<T>` bridge (implies `alloc`) |
 | `facet`  | Enables `BytecastFacet` bridge (implies `alloc`) |

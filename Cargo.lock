@@ -79,7 +79,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
- "zerocopy",
 ]
 
 [[package]]

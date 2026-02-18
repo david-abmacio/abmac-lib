@@ -1,10 +1,13 @@
-//! Native implementations for types not covered by zerocopy.
+//! Native implementations for built-in types.
 //!
-//! Zerocopy cannot handle:
+//! All multi-byte primitives use little-endian wire format (see `wrapper` module).
+//! Types requiring validation or variable-length encoding are implemented here:
 //! - `bool` / `char` - not all bit patterns are valid
-//! - `usize` / `isize` - platform-dependent size
-//! - `Option<T>` - discriminant + variable payload
-//! - `Vec<T>` / `String` - variable length (alloc feature)
+//! - `usize` / `isize` - platform-dependent size, serialized as u64/i64
+//! - `Option<T>` / `Result<T, E>` - discriminant + variable payload
+//! - `Range<T>` / `RangeInclusive<T>` - start + end
+//! - `NonZero*` - validated on decode
+//! - `Vec<T>` / `String` / collections - variable length (alloc/std features)
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
@@ -116,7 +119,7 @@ impl FromBytes for isize {
     }
 }
 
-// Option<T> - zerocopy cannot handle this (discriminant + variable payload)
+// Option<T> - discriminant + variable payload
 impl<T: ToBytes> ToBytes for Option<T> {
     const MAX_SIZE: Option<usize> = match T::MAX_SIZE {
         Some(s) => Some(1 + s),

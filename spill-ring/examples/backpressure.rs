@@ -19,7 +19,7 @@ fn main() {
 
     // Ring absorbs bursts; overflow goes to the channel via an infallible FnSpout.
     let mut ring = SpillRing::<u64, 256>::builder()
-        .sink(FnSpout(move |item: u64| {
+        .sink(FnSpout::new(move |item: u64| {
             // Blocking send — provides backpressure.
             let _ = tx.send(item);
         }))

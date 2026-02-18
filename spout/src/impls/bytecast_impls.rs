@@ -118,6 +118,12 @@ pub fn decode_frame<T: FromBytes>(frame: &[u8]) -> Result<(usize, T), BytesError
         });
     }
     let item: T = reader.read()?;
+    let trailing = reader.remaining().len();
+    if trailing != 0 {
+        return Err(BytesError::InvalidData {
+            message: "trailing bytes after payload in frame",
+        });
+    }
     Ok((producer_id, item))
 }
 

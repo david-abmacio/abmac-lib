@@ -114,12 +114,12 @@ impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
             .write(&payload_len)
             .map_err(FramedSpoutError::Encode)?;
 
-        // Truncate to actual frame size and send
+        // Truncate to actual frame size and send, preserving buffer capacity
         let total = FRAME_HEADER_SIZE + payload_written;
         self.buf.truncate(total);
-        self.inner
-            .send(self.buf.split_off(0))
-            .map_err(FramedSpoutError::Send)
+        let capacity = self.buf.capacity();
+        let frame = core::mem::replace(&mut self.buf, Vec::with_capacity(capacity));
+        self.inner.send(frame).map_err(FramedSpoutError::Send)
     }
 
     #[inline]

@@ -10,6 +10,11 @@
 use core::fmt;
 
 /// Runtime status value.
+///
+/// `#[non_exhaustive]` allows adding variants in future minor versions.
+/// `#[repr(u32)]` provides a stable wire format — unknown discriminants
+/// are rejected during deserialization, which is the intended behavior
+/// (older readers should fail explicitly on new status values).
 #[non_exhaustive]
 #[repr(u32)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]

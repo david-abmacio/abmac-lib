@@ -247,7 +247,7 @@ impl<E, S: Status, Overflow: Spout<Frame, Error = core::convert::Infallible>>
             // Evict oldest frame to overflow
             if let Some(evicted) = self.frames.pop_front() {
                 let _ = self.overflow.send(evicted);
-                self.overflow_count += 1;
+                self.overflow_count = self.overflow_count.saturating_add(1);
             }
         }
         self.frames.push_back(frame);
@@ -491,6 +491,7 @@ impl<E: bytecast::FromBytes + Actionable> bytecast::FromBytes for Context<E, Dyn
         offset += n;
         let (max_frames, n) = usize::from_bytes(&buf[offset..])?;
         offset += n;
+        let max_frames = max_frames.max(1);
         let (overflow_count, n) = usize::from_bytes(&buf[offset..])?;
         offset += n;
 
@@ -545,6 +546,7 @@ pub fn decode_context<E: bytecast::FromBytes + Actionable>(
     offset += n;
     let (max_frames, n) = usize::from_bytes(&buf[offset..])?;
     offset += n;
+    let max_frames = max_frames.max(1);
     let (overflow_count, n) = usize::from_bytes(&buf[offset..])?;
     offset += n;
 

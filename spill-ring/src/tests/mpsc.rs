@@ -1,6 +1,6 @@
 extern crate std;
 
-use crate::{MpscRing, collect};
+use crate::MpscRing;
 use spout::{CollectSpout, ProducerSpout};
 
 #[test]
@@ -19,19 +19,19 @@ fn basic_mpsc() {
     assert_eq!(producers[1].len(), 2);
 
     // Collect producers into consumer, then drain
-    collect(producers, &mut consumer);
-    let mut sink = CollectSpout::new();
-    consumer.drain(&mut sink);
+    consumer.collect(producers);
+    let mut spout = CollectSpout::new();
+    consumer.drain(&mut spout);
 
-    let mut items = sink.into_items();
+    let mut items = spout.into_items();
     items.sort_unstable();
     assert_eq!(items, std::vec![1, 2, 10, 20]);
 }
 
 #[test]
-fn producer_overflow_to_sink() {
-    let sink = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
-    let producers = MpscRing::<u64, 4, _>::with_sink(1, sink);
+fn producer_overflow_to_spout() {
+    let spout = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
+    let producers = MpscRing::<u64, 4, _>::with_spout(1, spout);
     let producer = producers.into_iter().next().unwrap();
 
     // Overflow — push 10 items into ring of size 4
@@ -39,11 +39,11 @@ fn producer_overflow_to_sink() {
         producer.push(i);
     }
 
-    // Ring should have last 4 items, first 6 evicted to sink
+    // Ring should have last 4 items, first 6 evicted to spout
     assert_eq!(producer.len(), 4);
 
-    let mut ring = producer.into_ring();
-    let evicted = ring.sink().inner().unwrap().items();
+    let ring = producer.into_ring();
+    let evicted = ring.spout().inner().unwrap().items();
     assert_eq!(evicted, &[0, 1, 2, 3, 4, 5]);
     assert_eq!(ring.pop(), Some(6));
     assert_eq!(ring.pop(), Some(7));
@@ -62,11 +62,11 @@ fn single_producer() {
 
     assert_eq!(producer.len(), 10);
 
-    collect(std::vec![producer], &mut consumer);
-    let mut sink = CollectSpout::new();
-    consumer.drain(&mut sink);
+    consumer.collect(std::vec![producer]);
+    let mut spout = CollectSpout::new();
+    consumer.drain(&mut spout);
 
-    assert_eq!(sink.into_items(), std::vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_eq!(spout.into_items(), std::vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 }
 
 #[cfg(feature = "std")]
@@ -85,10 +85,10 @@ mod worker_pool_tests {
         pool.run(&50);
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
-        let items = sink.into_items();
+        let items = spout.into_items();
         assert_eq!(items.len(), 100); // 2 workers * 50 each
     }
 
@@ -104,11 +104,11 @@ mod worker_pool_tests {
         pool.run(&100);
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
         // Only last 8 items should remain in ring (92..100)
-        let items = sink.into_items();
+        let items = spout.into_items();
         assert_eq!(items, vec![92, 93, 94, 95, 96, 97, 98, 99]);
     }
 
@@ -132,11 +132,11 @@ mod worker_pool_tests {
         pool.run(&10);
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
         // Should have 40 items total (2 rings x 20 items each)
-        let items = sink.into_items();
+        let items = spout.into_items();
         assert_eq!(items.len(), 40);
     }
 
@@ -149,10 +149,10 @@ mod worker_pool_tests {
         pool.run(&());
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
-        let mut ids = sink.into_items();
+        let mut ids = spout.into_items();
         ids.sort_unstable();
         assert_eq!(ids, vec![0, 1, 2, 3]);
     }
@@ -167,35 +167,35 @@ mod worker_pool_tests {
         pool.run(&99);
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
-        let items = sink.into_items();
+        let items = spout.into_items();
         assert_eq!(items, vec![42, 99]);
     }
 
     #[test]
-    fn worker_pool_with_sink() {
+    fn worker_pool_with_spout() {
         use spout::ProducerSpout;
 
-        let sink = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
+        let spout = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
 
         let mut pool =
-            MpscRing::<u64, 4, _>::pool_with_sink(2, sink).spawn(|ring, _id, count: &u64| {
+            MpscRing::<u64, 4, _>::pool_with_spout(2, spout).spawn(|ring, _id, count: &u64| {
                 for i in 0..*count {
                     ring.push(i);
                 }
             });
 
-        // Push 10 items per worker into ring of size 4 — forces overflow to sink
+        // Push 10 items per worker into ring of size 4 — forces overflow to spout
         pool.run(&10);
 
         let mut consumer = pool.into_consumer();
-        let mut drain_sink = CollectSpout::new();
-        consumer.drain(&mut drain_sink);
+        let mut drain_spout = CollectSpout::new();
+        consumer.drain(&mut drain_spout);
 
         // Each worker has a ring of size 4, pushed 10 items → last 4 remain per ring
-        let items = drain_sink.into_items();
+        let items = drain_spout.into_items();
         assert_eq!(items.len(), 8);
         // Each worker's ring should contain [6, 7, 8, 9] (last 4 of 0..10)
         // Items drain in producer order: worker0's 4, then worker1's 4
@@ -274,10 +274,10 @@ mod worker_pool_tests {
         pool.run(&3);
 
         let mut consumer = pool.into_consumer();
-        let mut sink = CollectSpout::new();
-        consumer.drain(&mut sink);
+        let mut spout = CollectSpout::new();
+        consumer.drain(&mut spout);
 
-        let mut items = sink.into_items();
+        let mut items = spout.into_items();
         items.sort_unstable();
         // Worker 0: 1, 2, 3. Worker 1: 101, 102, 103.
         assert_eq!(items, vec![1, 2, 3, 101, 102, 103]);
@@ -295,16 +295,16 @@ fn with_consumer_and_collect() {
     producers[1].push(10);
     producers[2].push(100);
 
-    collect(producers, &mut consumer);
+    consumer.collect(producers);
 
     assert_eq!(consumer.num_producers(), 3);
     assert_eq!(consumer.len(), 4);
     assert!(!consumer.is_empty());
 
-    let mut sink = CollectSpout::new();
-    consumer.drain(&mut sink);
+    let mut spout = CollectSpout::new();
+    consumer.drain(&mut spout);
 
-    let mut items = sink.into_items();
+    let mut items = spout.into_items();
     items.sort_unstable();
     assert_eq!(items, std::vec![1, 2, 10, 100]);
 
@@ -337,12 +337,12 @@ fn multi_threaded_producers() {
             .collect()
     });
 
-    collect(finished, &mut consumer);
+    consumer.collect(finished);
 
-    let mut sink = CollectSpout::new();
-    consumer.drain(&mut sink);
+    let mut spout = CollectSpout::new();
+    consumer.drain(&mut spout);
 
-    let items = sink.into_items();
+    let items = spout.into_items();
     // 4 threads x 100 items, ring capacity 64 so last 64 per thread survive
     assert_eq!(items.len(), 256);
 

@@ -6,7 +6,7 @@
 //!
 //! Run with: cargo run --example mpsc --features std
 
-use spill_ring::{MpscRing, collect};
+use spill_ring::MpscRing;
 use spout::CollectSpout;
 use std::thread;
 
@@ -37,11 +37,11 @@ fn main() {
     });
 
     // Reunite producers with consumer, then drain remaining ring contents.
-    collect(finished, &mut consumer);
+    consumer.collect(finished);
 
-    let mut sink = CollectSpout::new();
-    consumer.drain(&mut sink);
-    let items = sink.into_items();
+    let mut spout = CollectSpout::new();
+    consumer.drain(&mut spout);
+    let items = spout.into_items();
 
     // Only the last 256 items per producer remain in each ring (earlier
     // items were dropped by DropSpout on overflow). With 256-slot rings

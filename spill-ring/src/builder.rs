@@ -15,19 +15,25 @@ use crate::SpillRing;
 ///
 /// ```
 /// use spill_ring::SpillRing;
+/// use spout::CollectSpout;
 ///
 /// // Default: warmed, DropSpout
 /// let ring = SpillRing::<u64, 256>::builder().build();
 ///
 /// // Cold (no cache warming)
 /// let ring = SpillRing::<u64, 256>::builder().cold().build();
+///
+/// // Custom spout
+/// let ring = SpillRing::<u64, 256>::builder()
+///     .spout(CollectSpout::new())
+///     .build();
 /// ```
 pub struct SpillRingBuilder<
     T,
     const N: usize,
     S: Spout<T, Error = core::convert::Infallible> = DropSpout,
 > {
-    sink: S,
+    spout: S,
     warm: bool,
     _marker: PhantomData<T>,
 }
@@ -35,7 +41,7 @@ pub struct SpillRingBuilder<
 impl<T, const N: usize> SpillRingBuilder<T, N, DropSpout> {
     pub(crate) fn new() -> Self {
         Self {
-            sink: DropSpout,
+            spout: DropSpout,
             warm: true,
             _marker: PhantomData,
         }
@@ -44,12 +50,12 @@ impl<T, const N: usize> SpillRingBuilder<T, N, DropSpout> {
 
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRingBuilder<T, N, S> {
     /// Set a custom spout for handling evicted items.
-    pub fn sink<S2: Spout<T, Error = core::convert::Infallible>>(
+    pub fn spout<S2: Spout<T, Error = core::convert::Infallible>>(
         self,
-        sink: S2,
+        spout: S2,
     ) -> SpillRingBuilder<T, N, S2> {
         SpillRingBuilder {
-            sink,
+            spout,
             warm: self.warm,
             _marker: PhantomData,
         }
@@ -69,9 +75,9 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     /// Build the [`SpillRing`].
     pub fn build(self) -> SpillRing<T, N, S> {
         if self.warm {
-            SpillRing::with_sink(self.sink)
+            SpillRing::with_spout(self.spout)
         } else {
-            SpillRing::with_sink_cold(self.sink)
+            SpillRing::with_spout_cold(self.spout)
         }
     }
 }

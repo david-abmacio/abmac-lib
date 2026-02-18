@@ -12,7 +12,7 @@ Bounded buffers usually force a choice: block when full, drop new items, or drop
 |------|-------------|----------|
 | `SpillRing<T, N, S>` | Single-threaded ring buffer using `Cell`-based indices | — |
 | `MpscRing<T, N, S>` | Zero-contention MPSC — each producer owns an independent `SpillRing` | `alloc` |
-| `WorkerPool<T, N, S, F, A>` | Persistent thread pool with pre-warmed rings and spin-barrier sync | `std` |
+| `WorkerPool<T, N, S, F, A>` | Thread-per-core pool with per-worker signaling and zero-allocation ring handoff | `std` |
 
 ## Ring Chaining
 
@@ -91,7 +91,7 @@ Benchmarked vs `std::collections::VecDeque`, with manual eviction (~758 Melem/s)
 | 6 | 10.3 Gelem/s | 1.71 Gelem/s |
 | 8 | 6.5 Gelem/s | 0.81 Gelem/s |
 
-Scales linearly up to N-2 cores. At full core count (8 workers on 8 cores), the spin-barrier, benchmark harness, and OS scheduler all compete for cycles with no free cores to absorb the overhead. This halves per-worker throughput. Leave at least 2 cores free for best results.
+Scales linearly up to N-2 cores. At full core count (8 workers on 8 cores), the benchmark harness and OS scheduler compete for cycles with no free cores to absorb the overhead. Leave at least 2 cores free for best results.
 
 | 1 worker | 2 workers | 4 workers |
 |:---:|:---:|:---:|
@@ -101,7 +101,7 @@ Scales linearly up to N-2 cores. At full core count (8 workers on 8 cores), the 
 
 Power-of-two capacity enables fast bitwise modulo. All rings are cache-warmed by default.
 
-**With `std`**, WorkerPool adds persistent threads with pre-warmed rings (no `thread::spawn` per run) and spin-barrier sync.
+**With `std`**, WorkerPool adds persistent threads with pre-warmed rings, per-worker signaling, and pre-allocated ring handoff. Each worker owns its ring exclusively during operation — zero contention on the produce path.
 
 Run benchmarks locally: `cargo bench -p spill-ring --features std`
 

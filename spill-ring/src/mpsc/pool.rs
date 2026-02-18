@@ -52,7 +52,7 @@ impl std::error::Error for WorkerPanic {}
 /// Builder for constructing a [`WorkerPool`].
 ///
 /// Created via [`MpscRing::pool()`](super::MpscRing::pool) or
-/// [`MpscRing::pool_with_sink()`](super::MpscRing::pool_with_sink).
+/// [`MpscRing::pool_with_spout()`](super::MpscRing::pool_with_spout).
 /// Call [`spawn()`](PoolBuilder::spawn) to provide the work function and
 /// start the pool.
 pub struct PoolBuilder<
@@ -61,7 +61,7 @@ pub struct PoolBuilder<
     S: Spout<T, Error = core::convert::Infallible> = DropSpout,
 > {
     num_workers: usize,
-    sink: S,
+    spout: S,
     _marker: PhantomData<T>,
 }
 
@@ -70,7 +70,7 @@ impl<T: Send + 'static, const N: usize> PoolBuilder<T, N, DropSpout> {
         assert!(num_workers > 0, "must have at least one worker");
         Self {
             num_workers,
-            sink: DropSpout,
+            spout: DropSpout,
             _marker: PhantomData,
         }
     }
@@ -82,11 +82,11 @@ impl<
     S: Spout<T, Error = core::convert::Infallible> + Clone + Send + 'static,
 > PoolBuilder<T, N, S>
 {
-    pub(crate) fn with_sink(num_workers: usize, sink: S) -> Self {
+    pub(crate) fn with_spout(num_workers: usize, spout: S) -> Self {
         assert!(num_workers > 0, "must have at least one worker");
         Self {
             num_workers,
-            sink,
+            spout,
             _marker: PhantomData,
         }
     }
@@ -119,7 +119,7 @@ impl<
         F: Fn(&SpillRing<T, N, S>, usize, &A) + Send + Clone + 'static,
         A: Sync + 'static,
     {
-        WorkerPool::start(self.num_workers, self.sink, work)
+        WorkerPool::start(self.num_workers, self.spout, work)
     }
 }
 
@@ -162,8 +162,8 @@ where
     F: Fn(&SpillRing<T, N, S>, usize, &A) + Send + Clone + 'static,
     A: Sync + 'static,
 {
-    #[allow(clippy::needless_pass_by_value)] // sink is cloned per-worker, consumed by move
-    fn start(num_workers: usize, sink: S, work: F) -> Self {
+    #[allow(clippy::needless_pass_by_value)] // spout is cloned per-worker, consumed by move
+    fn start(num_workers: usize, spout: S, work: F) -> Self {
         let spin_limit = sync::compute_spin_limit(num_workers + 1);
 
         // Allocate signals and slots on the heap for stable addresses.
@@ -181,7 +181,7 @@ where
         // After construction, zero allocations occur in steady state —
         // rings cycle between active/published/recycled via pointer swaps.
         let mut rings: Vec<Box<SpillRing<T, N, S>>> = (0..num_workers * 2)
-            .map(|_| Box::new(SpillRing::with_sink(sink.clone())))
+            .map(|_| Box::new(SpillRing::with_spout(spout.clone())))
             .collect();
 
         // Place spare rings into recycle slots (one per worker).

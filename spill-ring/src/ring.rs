@@ -59,7 +59,7 @@ pub struct SpillRing<T, const N: usize, S: Spout<T, Error = core::convert::Infal
     pub(crate) head: CellIndex,
     pub(crate) tail: CellIndex,
     pub(crate) buffer: [Slot<T>; N],
-    sink: SpoutCell<S>,
+    spout: SpoutCell<S>,
 }
 
 // SAFETY: SpillRing uses interior mutability (Cell/UnsafeCell) for single-threaded
@@ -109,7 +109,7 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
             head: CellIndex::new(0),
             tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            sink: SpoutCell::new(DropSpout),
+            spout: SpoutCell::new(DropSpout),
         }
     }
 }
@@ -117,15 +117,15 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRing<T, N, S> {
     /// Create a new ring buffer with pre-warmed cache and a custom spout.
     #[must_use]
-    pub fn with_sink(sink: S) -> Self {
-        let mut ring = Self::with_sink_cold(sink);
+    pub(crate) fn with_spout(spout: S) -> Self {
+        let mut ring = Self::with_spout_cold(spout);
         ring.warm();
         ring
     }
 
     /// Create a new ring buffer with a custom spout, without cache warming.
     #[must_use]
-    pub fn with_sink_cold(sink: S) -> Self {
+    pub(crate) fn with_spout_cold(spout: S) -> Self {
         const { assert!(N > 0, "capacity must be > 0") };
         const { assert!(N.is_power_of_two(), "capacity must be power of two") };
         const { assert!(N <= MAX_CAPACITY, "capacity exceeds maximum (2^20)") };
@@ -134,7 +134,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             head: CellIndex::new(0),
             tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            sink: SpoutCell::new(sink),
+            spout: SpoutCell::new(spout),
         }
     }
 
@@ -175,7 +175,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             self.head.store(head.wrapping_add(1));
             // SAFETY: SpillRing is !Sync, so &self proves single-context access.
             // No &mut S alias can exist because that requires &mut self.
-            let _ = unsafe { self.sink.get_mut_unchecked().send(evicted) };
+            let _ = unsafe { self.spout.get_mut_unchecked().send(evicted) };
         }
 
         let idx = tail & (N - 1);
@@ -196,7 +196,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             // SAFETY: Slot at head is initialized. assume_init_read moves value out.
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(1));
-            let _ = self.sink.get_mut().send(evicted);
+            let _ = self.spout.get_mut().send(evicted);
         }
 
         let idx = tail & (N - 1);
@@ -247,13 +247,13 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             if len > 0 {
                 let h = head;
                 // SAFETY: Slots [head..tail) are initialized. Each index is consumed once.
-                let _ = self.sink.get_mut().send_all((0..len).map(|i| unsafe {
+                let _ = self.spout.get_mut().send_all((0..len).map(|i| unsafe {
                     (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
                 }));
             }
             let excess = items.len() - N;
             for &item in &items[..excess] {
-                let _ = self.sink.get_mut().send(item);
+                let _ = self.spout.get_mut().send(item);
             }
             head = head.wrapping_add(len);
             tail = head;
@@ -272,7 +272,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             let h = head;
             // SAFETY: Slots [head..head+evict_count) are initialized. Each consumed once.
             let _ = self
-                .sink
+                .spout
                 .get_mut()
                 .send_all((0..evict_count).map(|i| unsafe {
                     (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
@@ -384,7 +384,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             return 0;
         }
 
-        let sink = self.sink.get_mut();
+        let out = self.spout.get_mut();
         for i in 0..count {
             let idx = head.wrapping_add(i) & (N - 1);
             // SAFETY: Slot at idx is initialized (head..tail range). assume_init_read
@@ -392,7 +392,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             // panic safety.
             let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(i + 1));
-            let _ = sink.send(item);
+            let _ = out.send(item);
         }
 
         self.tail.store_mut(tail);
@@ -455,30 +455,21 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
     /// Shared reference to the spout.
     ///
-    /// # Safety contract
-    /// Safe to call when no `push`, `flush`, or other mutation is in
-    /// progress — guaranteed by Rust's borrow rules since `&self`
-    /// prevents any concurrent `&mut self` call.
+    /// Uses interior mutability — safe because `SpillRing` is `!Sync`,
+    /// so `&self` proves single-context access.
     #[inline]
     #[must_use]
-    pub fn sink_ref(&self) -> &S {
+    pub fn spout(&self) -> &S {
         // SAFETY: SpillRing is !Sync, so &self proves single-context
         // access.  No &mut S alias can exist because that would
         // require &mut self, which conflicts with this &self borrow.
-        unsafe { self.sink.get_ref() }
-    }
-
-    /// Reference to the spout.
-    #[inline]
-    #[must_use]
-    pub fn sink(&mut self) -> &S {
-        self.sink.get_mut()
+        unsafe { self.spout.get_ref() }
     }
 
     /// Mutable reference to the spout.
     #[inline]
-    pub fn sink_mut(&mut self) -> &mut S {
-        self.sink.get_mut()
+    pub fn spout_mut(&mut self) -> &mut S {
+        self.spout.get_mut()
     }
 
     /// Iterate mutably, oldest to newest.
@@ -568,7 +559,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Drop
 {
     fn drop(&mut self) {
         let _ = self.flush();
-        let _ = self.sink.get_mut().flush();
+        let _ = self.spout.get_mut().flush();
     }
 }
 

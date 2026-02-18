@@ -10,8 +10,8 @@ pub(crate) struct SpoutCell<S>(UnsafeCell<S>);
 
 impl<S> SpoutCell<S> {
     #[inline]
-    pub(crate) const fn new(sink: S) -> Self {
-        Self(UnsafeCell::new(sink))
+    pub(crate) const fn new(spout: S) -> Self {
+        Self(UnsafeCell::new(spout))
     }
 
     /// # Safety

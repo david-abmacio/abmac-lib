@@ -20,7 +20,7 @@ pub use builder::SpillRingBuilder;
 pub use error::PushError;
 pub use iter::{SpillRingIter, SpillRingIterMut};
 #[cfg(feature = "alloc")]
-pub use mpsc::{Consumer, MpscRing, Producer, collect};
+pub use mpsc::{Consumer, MpscRing, Producer};
 #[cfg(feature = "std")]
 pub use mpsc::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use ring::{Drain, SpillRing};

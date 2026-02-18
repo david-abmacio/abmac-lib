@@ -1,7 +1,7 @@
 //! Retry helpers with typestate tracking.
 
-use alloc::{collections::VecDeque, format};
-use core::fmt::{self, Display};
+use alloc::{collections::VecDeque, string::String};
+use core::fmt::{self, Display, Write};
 
 use spout::DropSpout;
 
@@ -149,12 +149,16 @@ where
     F: FnMut() -> Result<T, Context<E, Dynamic>>,
 {
     let max_attempts = max_attempts.max(1);
+    let mut attempt_msg = String::with_capacity(32);
 
     // Run the first attempt outside the loop to establish a non-Option binding.
     let mut last_temp = match f() {
         Ok(v) => return Ok(v),
         Err(e) => match e.resolve() {
-            Resolved::Temporary(temp) => temp.with_ctx(format!("attempt 1/{max_attempts}")),
+            Resolved::Temporary(temp) => {
+                write!(attempt_msg, "attempt 1/{max_attempts}").unwrap();
+                temp.with_ctx(attempt_msg.clone())
+            }
             Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
             Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
         },
@@ -165,7 +169,9 @@ where
             Ok(v) => return Ok(v),
             Err(e) => match e.resolve() {
                 Resolved::Temporary(temp) => {
-                    last_temp = temp.with_ctx(format!("attempt {attempt}/{max_attempts}"));
+                    attempt_msg.clear();
+                    write!(attempt_msg, "attempt {attempt}/{max_attempts}").unwrap();
+                    last_temp = temp.with_ctx(attempt_msg.clone());
                 }
                 Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
                 Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
@@ -198,12 +204,16 @@ where
     D: FnMut(u32) -> std::time::Duration,
 {
     let max_attempts = max_attempts.max(1);
+    let mut attempt_msg = String::with_capacity(32);
 
     // Run the first attempt outside the loop to establish a non-Option binding.
     let mut last_temp = match f() {
         Ok(v) => return Ok(v),
         Err(e) => match e.resolve() {
-            Resolved::Temporary(temp) => temp.with_ctx(format!("attempt 1/{max_attempts}")),
+            Resolved::Temporary(temp) => {
+                write!(attempt_msg, "attempt 1/{max_attempts}").unwrap();
+                temp.with_ctx(attempt_msg.clone())
+            }
             Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
             Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
         },
@@ -216,7 +226,9 @@ where
             Ok(v) => return Ok(v),
             Err(e) => match e.resolve() {
                 Resolved::Temporary(temp) => {
-                    last_temp = temp.with_ctx(format!("attempt {attempt}/{max_attempts}"));
+                    attempt_msg.clear();
+                    write!(attempt_msg, "attempt {attempt}/{max_attempts}").unwrap();
+                    last_temp = temp.with_ctx(attempt_msg.clone());
                 }
                 Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
                 Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),

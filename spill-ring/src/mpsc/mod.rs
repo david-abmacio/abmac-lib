@@ -34,13 +34,15 @@ mod consumer;
 mod producer;
 
 #[cfg(feature = "std")]
-pub(crate) mod barrier;
+mod handoff;
 #[cfg(feature = "std")]
 mod pool;
+#[cfg(feature = "std")]
+mod sync;
 
 pub use consumer::{Consumer, collect};
 #[cfg(feature = "std")]
-pub use pool::{PoolBuilder, WorkerPool};
+pub use pool::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use producer::Producer;
 
 use alloc::vec::Vec;

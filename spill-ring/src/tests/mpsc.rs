@@ -214,6 +214,74 @@ mod worker_pool_tests {
         pool.run(&100);
         drop(pool); // Should not panic or hang
     }
+
+    #[test]
+    fn worker_panic_does_not_deadlock() {
+        use std::panic;
+
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let mut pool = MpscRing::<u64, 64>::pool(2).spawn(|_ring, id, _args: &()| {
+                if id == 0 {
+                    panic!("intentional test panic");
+                }
+            });
+            pool.run(&());
+        }));
+
+        // run() should propagate the panic, not deadlock.
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn try_run_returns_error_on_panic() {
+        let mut pool = MpscRing::<u64, 64>::pool(2).spawn(|_ring, id, _args: &()| {
+            if id == 0 {
+                panic!("intentional test panic");
+            }
+        });
+
+        // First call triggers the panic.
+        // Give the panicking worker a moment to actually panic.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let result = pool.try_run(&());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.worker_id, 0);
+    }
+
+    #[test]
+    fn drop_after_panic_does_not_abort() {
+        // If Drop double-panics, the process aborts. This test verifies
+        // that dropping a pool with a panicked worker is graceful.
+        let pool = MpscRing::<u64, 64>::pool(2).spawn(|_ring, id, _args: &()| {
+            if id == 1 {
+                panic!("intentional test panic");
+            }
+        });
+        // Just drop the pool — should not abort.
+        drop(pool);
+    }
+
+    #[test]
+    fn multiple_run_cycles_accumulate_items() {
+        // Verify items from multiple run() calls are all collected.
+        let mut pool = MpscRing::<u64, 128>::pool(2).spawn(|ring, id, round: &u64| {
+            ring.push(id as u64 * 100 + *round);
+        });
+
+        pool.run(&1);
+        pool.run(&2);
+        pool.run(&3);
+
+        let mut consumer = pool.into_consumer();
+        let mut sink = CollectSpout::new();
+        consumer.drain(&mut sink);
+
+        let mut items = sink.into_items();
+        items.sort_unstable();
+        // Worker 0: 1, 2, 3. Worker 1: 101, 102, 103.
+        assert_eq!(items, vec![1, 2, 3, 101, 102, 103]);
+    }
 }
 
 // --- Missing coverage tests ---

@@ -127,7 +127,7 @@ where
 
     /// Flush buffered entries to the spout.
     pub(crate) fn flush(&mut self) {
-        self.ring.flush();
+        let _ = self.ring.flush();
     }
 
     /// Current sequence number (next entry will have this seq).

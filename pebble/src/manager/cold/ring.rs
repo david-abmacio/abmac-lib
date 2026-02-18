@@ -92,7 +92,7 @@ where
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        self.ring.flush();
+        let _ = self.ring.flush();
         let _ = self.ring.sink_mut().flush();
         Ok(())
     }

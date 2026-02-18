@@ -60,8 +60,28 @@ impl<S> FramedSpout<S> {
     }
 }
 
-impl<T: ToBytes, S: Spout<Vec<u8>, Error = core::convert::Infallible>> Spout<T> for FramedSpout<S> {
-    type Error = BytesError;
+/// Error from a [`FramedSpout`].
+///
+/// Wraps either a serialization error or the inner spout's send error.
+#[derive(Debug)]
+pub enum FramedSpoutError<E> {
+    /// Serialization or framing failed.
+    Encode(BytesError),
+    /// The inner spout returned an error.
+    Send(E),
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for FramedSpoutError<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Encode(e) => write!(f, "encode: {e}"),
+            Self::Send(e) => write!(f, "send: {e}"),
+        }
+    }
+}
+
+impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
+    type Error = FramedSpoutError<S::Error>;
 
     #[inline]
     fn send(&mut self, item: T) -> Result<(), Self::Error> {
@@ -73,32 +93,38 @@ impl<T: ToBytes, S: Spout<Vec<u8>, Error = core::convert::Infallible>> Spout<T> 
         self.buf.resize(FRAME_HEADER_SIZE + payload_size, 0);
 
         // Write payload first to learn actual size
-        let payload_written = item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])?;
+        let payload_written = item
+            .to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])
+            .map_err(FramedSpoutError::Encode)?;
 
         // Validate payload fits in u32 length field
-        let payload_len =
-            u32::try_from(payload_written).map_err(|_| BytesError::BufferTooSmall {
+        let payload_len = u32::try_from(payload_written).map_err(|_| {
+            FramedSpoutError::Encode(BytesError::BufferTooSmall {
                 needed: payload_written,
                 available: u32::MAX as usize,
-            })?;
+            })
+        })?;
 
         // Write header: producer_id + payload length
         let mut cursor = ByteCursor::new(&mut self.buf[..FRAME_HEADER_SIZE]);
-        cursor.write(&self.producer_id)?;
-        cursor.write(&payload_len)?;
+        cursor
+            .write(&self.producer_id)
+            .map_err(FramedSpoutError::Encode)?;
+        cursor
+            .write(&payload_len)
+            .map_err(FramedSpoutError::Encode)?;
 
-        // Truncate to actual frame size and reuse buffer
+        // Truncate to actual frame size and send
         let total = FRAME_HEADER_SIZE + payload_written;
         self.buf.truncate(total);
-        // Inner spout is infallible
-        let _ = self.inner.send(self.buf.split_off(0));
-        Ok(())
+        self.inner
+            .send(self.buf.split_off(0))
+            .map_err(FramedSpoutError::Send)
     }
 
     #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
-        let _ = self.inner.flush();
-        Ok(())
+        self.inner.flush().map_err(FramedSpoutError::Send)
     }
 }
 

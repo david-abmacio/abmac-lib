@@ -61,7 +61,10 @@ pub fn repr_int_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {
 pub fn disc_capacity(disc_type: &str) -> usize {
     match disc_type {
         "u8" | "i8" => 256,
-        "u16" | "i16" => 65536,
+        "u16" | "i16" => 65_536,
+        // 2^32 on 64-bit hosts; saturates to usize::MAX on 32-bit.
+        "u32" | "i32" => (u32::MAX as u64 + 1).min(usize::MAX as u64) as usize,
+        "u64" | "i64" => usize::MAX,
         _ => usize::MAX,
     }
 }

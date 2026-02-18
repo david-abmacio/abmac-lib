@@ -85,8 +85,11 @@ pub(crate) fn serialize_to_vec(
     let mut buf = alloc::vec![0u8; hint];
     let n = match value.to_bytes(&mut buf) {
         Ok(n) => n,
-        Err(BytesError::BufferTooSmall { needed, .. }) => {
-            buf.resize(needed, 0);
+        Err(BytesError::BufferTooSmall { .. }) => {
+            // Don't trust `needed` from the error — it may be relative to a
+            // sub-slice deep in a nested to_bytes call. Compute the true size.
+            let exact = value.byte_len().unwrap_or(buf.len() * 2);
+            buf.resize(exact, 0);
             value.to_bytes(&mut buf)?
         }
         Err(e) => return Err(e),

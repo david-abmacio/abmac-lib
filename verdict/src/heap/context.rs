@@ -296,8 +296,7 @@ impl<E, S: Status, Overflow: Spout<Frame, Error = core::convert::Infallible>>
     pub fn assert_origin(self, module_prefix: &str) -> Self {
         debug_assert!(
             self.frames.iter().any(|f| f.file().contains(module_prefix)),
-            "missing provenance: expected frame from '{}'",
-            module_prefix
+            "missing provenance: expected frame from '{module_prefix}'"
         );
         self
     }
@@ -541,6 +540,11 @@ pub enum DecodedContext<E> {
 /// Unlike `FromBytes for Context<E, Dynamic, DropSpout>` which always returns
 /// `Dynamic`, this function restores the status typestate that was present
 /// when the context was serialized.
+///
+/// # Errors
+///
+/// Returns [`bytecast::BytesError`] if the buffer is too short or contains
+/// invalid data.
 #[cfg(feature = "bytecast")]
 pub fn decode_context<E: bytecast::FromBytes + Actionable>(
     buf: &[u8],

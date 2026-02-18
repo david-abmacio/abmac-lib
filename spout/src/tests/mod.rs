@@ -25,7 +25,7 @@ fn drop_spout_accepts_items() {
 fn fn_spout_calls_closure() {
     let mut collected = Vec::new();
     {
-        let mut s = FnSpout(|x: i32| collected.push(x));
+        let mut s = FnSpout::new(|x: i32| collected.push(x));
         let _ = s.send(1);
         let _ = s.send(2);
         let _ = s.send(3);

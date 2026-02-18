@@ -127,7 +127,7 @@ fn fn_spout_with_to_bytes_serialization() {
 
     let mut serialized = Vec::new();
     {
-        let mut s = FnSpout(|item: u32| {
+        let mut s = FnSpout::new(|item: u32| {
             serialized.extend(item.to_vec().unwrap());
         });
         let _ = s.send(1u32);

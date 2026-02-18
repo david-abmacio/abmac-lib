@@ -66,7 +66,14 @@ impl<T> Spout<T> for CollectSpout<T> {
 /// Calls a closure for each item.
 #[must_use]
 #[derive(Debug)]
-pub struct FnSpout<F>(pub F);
+pub struct FnSpout<F>(F);
+
+impl<F> FnSpout<F> {
+    /// Create a new closure-based spout.
+    pub fn new(f: F) -> Self {
+        Self(f)
+    }
+}
 
 impl<T, F: FnMut(T)> Spout<T> for FnSpout<F> {
     type Error = core::convert::Infallible;

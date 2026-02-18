@@ -36,7 +36,7 @@ assert_eq!(s.items(), &[1, 2, 3]);
 use spout::{FnSpout, Spout};
 
 let mut collected = Vec::new();
-let mut s = FnSpout(|x: i32| collected.push(x));
+let mut s = FnSpout::new(|x: i32| collected.push(x));
 s.send(10);
 s.send(20);
 ```

@@ -50,7 +50,7 @@ impl<'a> ByteCursor<'a> {
     }
 
     pub fn remaining(&self) -> usize {
-        self.buf.len() - self.pos
+        self.buf.len().saturating_sub(self.pos)
     }
 
     pub fn written(&self) -> &[u8] {

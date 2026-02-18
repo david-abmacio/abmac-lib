@@ -9,6 +9,9 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+#[cfg(feature = "std")]
+extern crate std;
+
 mod error;
 mod impls;
 mod traits;

@@ -490,3 +490,74 @@ fn test_vecdeque_zst_rejects_oversized_length() {
     let result = VecDeque::<()>::from_bytes(&buf);
     assert!(result.is_err());
 }
+
+// --- BTreeSet tests ---
+
+#[test]
+fn test_btreeset_roundtrip() {
+    use alloc::collections::BTreeSet;
+    let original: BTreeSet<u32> = [3, 1, 4, 1, 5].into_iter().collect();
+    let mut buf = [0u8; 64];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeSet::<u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_btreeset_empty() {
+    use alloc::collections::BTreeSet;
+    let original: BTreeSet<u32> = BTreeSet::new();
+    let mut buf = [0u8; 8];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeSet::<u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+    assert_eq!(written, 1); // varint 0
+}
+
+#[test]
+fn test_btreeset_byte_len() {
+    use alloc::collections::BTreeSet;
+    let set: BTreeSet<u32> = [1, 2, 3].into_iter().collect();
+    // varint(3) = 1 byte, 3 * 4 bytes = 12, total = 13
+    assert_eq!(set.byte_len(), Some(13));
+}
+
+// --- BTreeMap tests ---
+
+#[test]
+fn test_btreemap_roundtrip() {
+    use alloc::collections::BTreeMap;
+    let mut original = BTreeMap::new();
+    original.insert(1u32, 10u64);
+    original.insert(2, 20);
+    original.insert(3, 30);
+    let mut buf = [0u8; 128];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeMap::<u32, u64>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_btreemap_empty() {
+    use alloc::collections::BTreeMap;
+    let original: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut buf = [0u8; 8];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeMap::<u32, u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+    assert_eq!(written, 1); // varint 0
+}
+
+#[test]
+fn test_btreemap_byte_len() {
+    use alloc::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert(1u32, 10u32);
+    map.insert(2, 20);
+    // varint(2) = 1 byte, 2 * (4 + 4) = 16, total = 17
+    assert_eq!(map.byte_len(), Some(17));
+}

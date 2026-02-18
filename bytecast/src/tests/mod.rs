@@ -1,6 +1,9 @@
 #[cfg(feature = "alloc")]
 mod alloc;
 
+#[cfg(feature = "std")]
+mod std_collections;
+
 #[cfg(feature = "serde")]
 mod serde;
 
@@ -369,4 +372,89 @@ fn test_result_max_size() {
     assert_eq!(<core::result::Result<u32, u32>>::MAX_SIZE, Some(5));
     // max(1, 8) + 1 = 9
     assert_eq!(<core::result::Result<u8, u64>>::MAX_SIZE, Some(9));
+}
+
+// Range tests
+#[test]
+fn test_range_roundtrip() {
+    let mut buf = [0u8; 8];
+    let value: core::ops::Range<u32> = 10..42;
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = <core::ops::Range<u32>>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
+}
+
+#[test]
+fn test_range_max_size() {
+    assert_eq!(<core::ops::Range<u32>>::MAX_SIZE, Some(8));
+    assert_eq!(<core::ops::Range<u8>>::MAX_SIZE, Some(2));
+}
+
+#[test]
+fn test_range_inclusive_roundtrip() {
+    let mut buf = [0u8; 8];
+    let value: core::ops::RangeInclusive<u32> = 10..=42;
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = <core::ops::RangeInclusive<u32>>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
+}
+
+#[test]
+fn test_range_inclusive_max_size() {
+    assert_eq!(<core::ops::RangeInclusive<u32>>::MAX_SIZE, Some(8));
+}
+
+// NonZero tests
+#[test]
+fn test_nonzero_u32_roundtrip() {
+    use core::num::NonZeroU32;
+    let mut buf = [0u8; 4];
+    let value = NonZeroU32::new(42).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 4);
+    let (decoded, consumed) = NonZeroU32::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 4);
+}
+
+#[test]
+fn test_nonzero_u32_rejects_zero() {
+    use core::num::NonZeroU32;
+    let buf = [0u8; 4];
+    let result = NonZeroU32::from_bytes(&buf);
+    assert!(matches!(result, Err(BytesError::InvalidData { .. })));
+}
+
+#[test]
+fn test_nonzero_i64_roundtrip() {
+    use core::num::NonZeroI64;
+    let mut buf = [0u8; 8];
+    let value = NonZeroI64::new(-99).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = NonZeroI64::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
+}
+
+#[test]
+fn test_nonzero_u8_max_size() {
+    use core::num::NonZeroU8;
+    assert_eq!(NonZeroU8::MAX_SIZE, Some(1));
+}
+
+#[test]
+fn test_nonzero_u128_roundtrip() {
+    use core::num::NonZeroU128;
+    let mut buf = [0u8; 16];
+    let value = NonZeroU128::new(1).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 16);
+    let (decoded, consumed) = NonZeroU128::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 16);
 }

@@ -1,13 +1,13 @@
 use alloc::{
     borrow::{Cow, ToOwned},
-    collections::VecDeque,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     string::String,
     vec::Vec,
 };
 
 use crate::{BytesError, FromBytes, ToBytes};
 
-mod var_int {
+pub(crate) mod var_int {
     //! Variable-length integer encoding (LEB128-style).
     //!
     //! Encodes integers using 1-5 bytes depending on magnitude:
@@ -106,7 +106,7 @@ mod var_int {
 
 /// Checked cast from usize to u32 for length prefixes.
 #[inline]
-fn checked_len(len: usize) -> Result<u32, BytesError> {
+pub(crate) fn checked_len(len: usize) -> Result<u32, BytesError> {
     u32::try_from(len).map_err(|_| BytesError::Custom {
         message: "collection exceeds u32::MAX length",
     })
@@ -312,5 +312,95 @@ impl<T: FromBytes + Clone> FromBytes for Cow<'_, [T]> {
     fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
         let (vec, n) = Vec::<T>::from_bytes(buf)?;
         Ok((Cow::Owned(vec), n))
+    }
+}
+
+// BTreeSet<T> - same wire format as Vec<T>
+impl<T: ToBytes> ToBytes for BTreeSet<T> {
+    const MAX_SIZE: Option<usize> = None;
+
+    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+        let len = checked_len(self.len())?;
+        let mut offset = var_int::encode(len, buf)?;
+        for item in self {
+            offset += item.to_bytes(&mut buf[offset..])?;
+        }
+        Ok(offset)
+    }
+
+    fn byte_len(&self) -> Option<usize> {
+        let mut total = var_int::len(checked_len(self.len()).ok()?);
+        for item in self {
+            total += item.byte_len()?;
+        }
+        Some(total)
+    }
+}
+
+impl<T: FromBytes + Ord> FromBytes for BTreeSet<T> {
+    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        let (len, mut offset) = var_int::decode(buf)?;
+        let len = len as usize;
+        let remaining = buf.len().saturating_sub(offset);
+        if len > remaining {
+            return Err(BytesError::UnexpectedEof {
+                needed: offset + len,
+                available: buf.len(),
+            });
+        }
+        let mut set = BTreeSet::new();
+        for _ in 0..len {
+            let (item, n) = T::from_bytes(&buf[offset..])?;
+            set.insert(item);
+            offset += n;
+        }
+        Ok((set, offset))
+    }
+}
+
+// BTreeMap<K, V> - varint length + interleaved key-value pairs
+impl<K: ToBytes, V: ToBytes> ToBytes for BTreeMap<K, V> {
+    const MAX_SIZE: Option<usize> = None;
+
+    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+        let len = checked_len(self.len())?;
+        let mut offset = var_int::encode(len, buf)?;
+        for (key, val) in self {
+            offset += key.to_bytes(&mut buf[offset..])?;
+            offset += val.to_bytes(&mut buf[offset..])?;
+        }
+        Ok(offset)
+    }
+
+    fn byte_len(&self) -> Option<usize> {
+        let mut total = var_int::len(checked_len(self.len()).ok()?);
+        for (key, val) in self {
+            total += key.byte_len()?;
+            total += val.byte_len()?;
+        }
+        Some(total)
+    }
+}
+
+impl<K: FromBytes + Ord, V: FromBytes> FromBytes for BTreeMap<K, V> {
+    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        let (len, mut offset) = var_int::decode(buf)?;
+        let len = len as usize;
+        let remaining = buf.len().saturating_sub(offset);
+        if len > remaining {
+            return Err(BytesError::UnexpectedEof {
+                needed: offset + len,
+                available: buf.len(),
+            });
+        }
+        let mut map = BTreeMap::new();
+        for _ in 0..len {
+            let (key, kn) = K::from_bytes(&buf[offset..])?;
+            offset += kn;
+            let (val, vn) = V::from_bytes(&buf[offset..])?;
+            offset += vn;
+            map.insert(key, val);
+        }
+        Ok((map, offset))
     }
 }

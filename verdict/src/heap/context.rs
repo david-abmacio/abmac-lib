@@ -79,6 +79,10 @@ pub struct Context<
 
 impl<E: Actionable> Context<E, Dynamic, DropSpout> {
     /// Create a new contextualized error with unbounded frames.
+    ///
+    /// When the `std` feature is enabled, a backtrace is captured automatically.
+    /// Capture is controlled by the `RUST_BACKTRACE` environment variable and
+    /// is a no-op when unset — there is no per-call opt-out.
     #[must_use]
     pub fn new(error: E) -> Self {
         Self {

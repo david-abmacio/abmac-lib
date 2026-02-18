@@ -26,6 +26,25 @@ impl<T> Slot<T> {
     }
 }
 
+/// Compile-time proof that `Slot<T>` has identical layout to `T`.
+/// Required for `push_slice`/`pop_slice` bulk `copy_nonoverlapping`.
+const _: () = {
+    // #[repr(transparent)] over UnsafeCell<MaybeUninit<T>> guarantees this,
+    // but an explicit assertion catches accidental changes to Slot's definition.
+    assert!(
+        core::mem::size_of::<Slot<u8>>() == core::mem::size_of::<u8>()
+            && core::mem::align_of::<Slot<u8>>() == core::mem::align_of::<u8>()
+    );
+    assert!(
+        core::mem::size_of::<Slot<u64>>() == core::mem::size_of::<u64>()
+            && core::mem::align_of::<Slot<u64>>() == core::mem::align_of::<u64>()
+    );
+    assert!(
+        core::mem::size_of::<Slot<u128>>() == core::mem::size_of::<u128>()
+            && core::mem::align_of::<Slot<u128>>() == core::mem::align_of::<u128>()
+    );
+};
+
 /// Maximum supported capacity (2^20 = ~1 million slots).
 /// Prevents accidental huge allocations from typos like `SpillRing<T, 1000000000>`.
 pub(crate) const MAX_CAPACITY: usize = 1 << 20;

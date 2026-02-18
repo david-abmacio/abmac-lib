@@ -435,3 +435,31 @@ fn test_tuple_mixed() {
 
     assert_eq!(<(u32, String)>::MAX_SIZE, None);
 }
+
+#[test]
+fn test_vec_zst_rejects_oversized_length() {
+    // Craft a payload claiming u32::MAX elements of () (ZST).
+    // varint encoding of u32::MAX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F]
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = Vec::<()>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_vec_zst_valid_small() {
+    // A valid Vec<()> with 3 elements — length fits in remaining buffer.
+    let mut buf = [0u8; 64];
+    let original: Vec<()> = vec![(), (), ()];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = Vec::<()>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_vecdeque_zst_rejects_oversized_length() {
+    use alloc::collections::VecDeque;
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = VecDeque::<()>::from_bytes(&buf);
+    assert!(result.is_err());
+}

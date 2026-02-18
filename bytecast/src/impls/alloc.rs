@@ -190,7 +190,7 @@ impl ToBytes for String {
         let len = checked_len(bytes.len())?;
         let offset = var_int::encode(len, buf)?;
 
-        if buf.len() - offset < bytes.len() {
+        if buf.len().saturating_sub(offset) < bytes.len() {
             return Err(BytesError::BufferTooSmall {
                 needed: offset + bytes.len(),
                 available: buf.len(),
@@ -210,7 +210,7 @@ impl FromBytes for String {
         let (len, mut offset) = var_int::decode(buf)?;
         let len = len as usize;
 
-        if buf.len() - offset < len {
+        if buf.len().saturating_sub(offset) < len {
             return Err(BytesError::UnexpectedEof {
                 needed: offset + len,
                 available: buf.len(),
@@ -237,7 +237,7 @@ impl ToBytes for Cow<'_, str> {
         let len = checked_len(bytes.len())?;
         let offset = var_int::encode(len, buf)?;
 
-        if buf.len() - offset < bytes.len() {
+        if buf.len().saturating_sub(offset) < bytes.len() {
             return Err(BytesError::BufferTooSmall {
                 needed: offset + bytes.len(),
                 available: buf.len(),

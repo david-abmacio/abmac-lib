@@ -277,6 +277,17 @@ impl<T, S: Spout<Vec<T>>> Spout<T> for BatchSpout<T, S> {
     }
 
     #[inline]
+    fn send_all(&mut self, items: impl Iterator<Item = T>) -> Result<(), Self::Error> {
+        self.buffer.extend(items);
+        while self.buffer.len() >= self.threshold {
+            let rest = self.buffer.split_off(self.threshold);
+            let batch = core::mem::replace(&mut self.buffer, rest);
+            self.sink.send(batch)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
         if !self.buffer.is_empty() {
             let batch = core::mem::replace(&mut self.buffer, Vec::with_capacity(self.threshold));
@@ -357,6 +368,18 @@ where
                 &mut self.buffer,
                 Vec::with_capacity(self.threshold),
             ));
+            self.sink.send(reduced)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn send_all(&mut self, items: impl Iterator<Item = T>) -> Result<(), Self::Error> {
+        self.buffer.extend(items);
+        while self.buffer.len() >= self.threshold {
+            let rest = self.buffer.split_off(self.threshold);
+            let batch = core::mem::replace(&mut self.buffer, rest);
+            let reduced = (self.reduce)(batch);
             self.sink.send(reduced)?;
         }
         Ok(())

@@ -176,7 +176,11 @@ where
     Err(RetryOutcome::Exhausted(last_temp.exhaust()))
 }
 
-/// Execute with retries and a delay between attempts.
+/// Execute with retries and a synchronous delay between attempts.
+///
+/// This function calls [`std::thread::sleep`] between attempts, which blocks
+/// the current thread. Do not use inside an async runtime — use an
+/// async-aware retry loop with `tokio::time::sleep` or equivalent instead.
 ///
 /// # Errors
 ///

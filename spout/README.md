@@ -92,9 +92,10 @@ s1.send(2);
 
 ## Feature Flags
 
-| Feature | Description |
-|---------|-------------|
-| `std`   | Enables `ChannelSpout` and `Arc<Mutex<S>>` support |
+| Feature    | Description |
+|------------|-------------|
+| `std`      | Enables `ChannelSpout` and `Arc<Mutex<S>>` support |
+| `bytecast` | Enables `FramedSpout`, frame encoding/decoding, and `BatchSpout` serialization |
 
 ## License
 

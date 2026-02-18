@@ -114,6 +114,15 @@ where
     FnFlushSpout::new(send, flush)
 }
 
+/// Multi-producer spout with unique IDs per clone.
+///
+/// Each clone receives a unique `producer_id` (0, 1, 2, ...) and lazily
+/// creates its own inner spout via the factory on first `send`. This allows
+/// independent per-producer resources (files, channels, framed streams)
+/// while sharing a single factory.
+///
+/// Clone is cheap — only the factory is cloned, the inner spout is created
+/// on demand.
 pub struct ProducerSpout<S, F> {
     /// The inner spout (created lazily on first send)
     inner: Option<S>,

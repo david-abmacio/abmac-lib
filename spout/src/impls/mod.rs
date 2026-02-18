@@ -1,4 +1,5 @@
 mod core_impls;
+mod sequenced;
 
 #[cfg(feature = "std")]
 mod std_impls;
@@ -7,6 +8,7 @@ mod std_impls;
 mod bytecast_impls;
 
 pub use core_impls::*;
+pub use sequenced::SequencedSpout;
 
 #[cfg(feature = "std")]
 pub use std_impls::*;

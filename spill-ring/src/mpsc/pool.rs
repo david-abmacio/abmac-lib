@@ -17,6 +17,7 @@ use crate::SpillRing;
 use spout::{DropSpout, Spout};
 
 use super::Consumer;
+use super::collector::Collector;
 use super::fan_in::FanInSpout;
 use super::handoff::{HandoffSlot, WorkerSignal};
 use super::sync;
@@ -430,11 +431,17 @@ where
     /// closure returns, the pool regains `&mut self` for subsequent
     /// `dispatch()`/`join()` calls.
     ///
+    /// The collector determines how batches are delivered. Use
+    /// [`UnorderedCollector`](super::collector::UnorderedCollector) for
+    /// simple forwarding, or
+    /// [`SequencedCollector`](super::collector::SequencedCollector) for
+    /// ordered delivery.
+    ///
     /// # Example
     ///
     /// ```
-    /// use spill_ring::MpscRing;
-    /// use spout::{CollectSpout, Spout};
+    /// use spill_ring::{MpscRing, UnorderedCollector};
+    /// use spout::CollectSpout;
     ///
     /// let mut pool = MpscRing::<u64, 256>::pool(2)
     ///     .spawn(|ring, _id, count: &u64| {
@@ -445,24 +452,24 @@ where
     ///
     /// pool.run(&10);
     ///
-    /// pool.with_fan_in(CollectSpout::new(), |fan_in| {
+    /// pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
     ///     fan_in.flush()
     /// }).unwrap();
     /// ```
-    pub fn with_fan_in<Out, R>(
+    pub fn with_fan_in<C, R>(
         &mut self,
-        inner: Out,
-        f: impl FnOnce(&mut FanInSpout<T, N, S, Out>) -> R,
+        collector: C,
+        f: impl FnOnce(&mut FanInSpout<T, N, S, C>) -> R,
     ) -> R
     where
-        Out: Spout<T>,
+        C: Collector<T>,
     {
-        let slot_ptrs = FanInSpout::<T, N, S, Out>::slot_ptrs_from(&self.slots);
+        let slot_ptrs = FanInSpout::<T, N, S, C>::slot_ptrs_from(&self.slots);
 
         // SAFETY: Slot pointers are valid for the duration of the closure.
         // The pool's &mut self borrow prevents dropping the pool or calling
         // dispatch/join until the closure returns.
-        let mut fan_in = unsafe { FanInSpout::new(slot_ptrs, inner) };
+        let mut fan_in = unsafe { FanInSpout::new(slot_ptrs, collector) };
         f(&mut fan_in)
     }
 
@@ -473,11 +480,11 @@ where
     /// The returned `FanInSpout` must not outlive `self`. The caller must
     /// ensure the pool is not dropped while the `FanInSpout` exists.
     /// Prefer [`with_fan_in()`](Self::with_fan_in) for the safe scoped API.
-    pub unsafe fn fan_in_unchecked<Out: Spout<T>>(&self, inner: Out) -> FanInSpout<T, N, S, Out> {
-        let slot_ptrs = FanInSpout::<T, N, S, Out>::slot_ptrs_from(&self.slots);
+    pub unsafe fn fan_in_unchecked<C: Collector<T>>(&self, collector: C) -> FanInSpout<T, N, S, C> {
+        let slot_ptrs = FanInSpout::<T, N, S, C>::slot_ptrs_from(&self.slots);
 
         // SAFETY: Caller guarantees the pool outlives the returned FanInSpout.
-        unsafe { FanInSpout::new(slot_ptrs, inner) }
+        unsafe { FanInSpout::new(slot_ptrs, collector) }
     }
 
     /// Run the work function on all workers with the given arguments.

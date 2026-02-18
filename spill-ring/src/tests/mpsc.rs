@@ -381,7 +381,7 @@ mod worker_pool_tests {
 
     #[test]
     fn fan_in_scoped_basic() {
-        use spout::Spout;
+        use crate::UnorderedCollector;
 
         let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
             for i in 0..*count {
@@ -392,7 +392,7 @@ mod worker_pool_tests {
         pool.run(&100);
 
         let mut collected = std::vec::Vec::new();
-        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+        pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
             fan_in.flush().unwrap();
             collected = fan_in.inner().items().to_vec();
         });
@@ -401,11 +401,12 @@ mod worker_pool_tests {
 
     #[test]
     fn fan_in_send_passthrough() {
+        use crate::UnorderedCollector;
         use spout::Spout;
 
         let mut pool = MpscRing::<u64, 256>::pool(1).spawn(|_ring, _id, _args: &()| {});
 
-        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+        pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
             fan_in.send(42).unwrap();
             fan_in.send(43).unwrap();
             assert_eq!(fan_in.inner().items(), &[42, 43]);
@@ -414,7 +415,7 @@ mod worker_pool_tests {
 
     #[test]
     fn fan_in_multiple_flushes() {
-        use spout::Spout;
+        use crate::UnorderedCollector;
 
         let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
             ring.push(1);
@@ -422,7 +423,7 @@ mod worker_pool_tests {
 
         pool.run(&());
 
-        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+        pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
             fan_in.flush().unwrap();
             let first = fan_in.inner().items().len();
             assert_eq!(first, 2);
@@ -434,16 +435,21 @@ mod worker_pool_tests {
 
     #[test]
     fn fan_in_num_slots() {
+        use crate::UnorderedCollector;
+
         let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|_ring, _id, _args: &()| {});
 
-        pool.with_fan_in(CollectSpout::<u64>::new(), |fan_in| {
-            assert_eq!(fan_in.num_slots(), 4);
-        });
+        pool.with_fan_in(
+            UnorderedCollector::new(CollectSpout::<u64>::new()),
+            |fan_in| {
+                assert_eq!(fan_in.num_slots(), 4);
+            },
+        );
     }
 
     #[test]
     fn fan_in_then_dispatch_join() {
-        use spout::Spout;
+        use crate::UnorderedCollector;
 
         // Verify pool is usable after with_fan_in scope ends
         let mut pool = MpscRing::<u64, 256>::pool(2).spawn(|ring, _id, _args: &()| {
@@ -452,7 +458,7 @@ mod worker_pool_tests {
 
         pool.run(&());
 
-        pool.with_fan_in(CollectSpout::new(), |fan_in| {
+        pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
             fan_in.flush().unwrap();
             assert_eq!(fan_in.inner().items().len(), 2);
         });
@@ -464,6 +470,75 @@ mod worker_pool_tests {
         let mut sink = CollectSpout::new();
         pool.collect(&mut sink).unwrap();
         assert_eq!(sink.items().len(), 2);
+    }
+
+    // --- Feature 3: SequencedSpout + Collector ---
+
+    #[test]
+    fn fan_in_sequenced_collector() {
+        use crate::SequencedCollector;
+
+        // 4 workers, each pushes worker_id + round*100. Verify output
+        // arrives in dispatch order (all items from round N before round N+1).
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, round: &u64| {
+            ring.push(*round * 100 + id as u64);
+        });
+
+        // Dispatch all 5 rounds, collecting with a single SequencedCollector
+        // that spans all rounds. All workers in round N share batch_seq=N,
+        // so the sequencer emits round 0 items, then round 1, etc.
+        let mut all_items = std::vec::Vec::new();
+
+        // Use fan_in_unchecked to keep the collector alive across rounds.
+        // SAFETY: pool outlives the fan_in — we drop fan_in before pool.
+        let mut fan_in =
+            unsafe { pool.fan_in_unchecked(SequencedCollector::from_spout(CollectSpout::new())) };
+
+        for round in 0..5u64 {
+            pool.dispatch(&round);
+            pool.join().unwrap();
+            fan_in.flush().unwrap();
+        }
+
+        all_items.extend_from_slice(fan_in.collector().sequencer().inner().items());
+        drop(fan_in);
+
+        // 4 workers * 5 rounds = 20 items total
+        assert_eq!(all_items.len(), 20);
+
+        // Verify ordering: items from round N appear before round N+1.
+        // Within a round, worker order is nondeterministic, but the round
+        // value (item / 100) must be monotonically non-decreasing.
+        let mut last_round = 0u64;
+        for &item in &all_items {
+            let item_round = item / 100;
+            assert!(
+                item_round >= last_round,
+                "ordering violation: item {item} (round {item_round}) after round {last_round}"
+            );
+            last_round = item_round;
+        }
+    }
+
+    #[test]
+    fn fan_in_unordered_collector() {
+        use crate::UnorderedCollector;
+
+        // Verify UnorderedCollector produces same total as pool.collect()
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(id as u64 * 10000 + i);
+            }
+        });
+
+        pool.run(&100);
+
+        let mut total = 0usize;
+        pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
+            fan_in.flush().unwrap();
+            total = fan_in.inner().items().len();
+        });
+        assert_eq!(total, 400);
     }
 
     // --- Feature 4: Backpressure ---

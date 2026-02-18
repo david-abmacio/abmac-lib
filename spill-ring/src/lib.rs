@@ -19,9 +19,12 @@ mod tests;
 pub use builder::SpillRingBuilder;
 pub use error::PushError;
 pub use iter::{SpillRingIter, SpillRingIterMut};
+#[cfg(feature = "std")]
+pub use mpsc::{
+    Collector, FanInSpout, PoolBuilder, SequencedCollector, UnorderedCollector, WorkerPanic,
+    WorkerPool,
+};
 #[cfg(feature = "alloc")]
 pub use mpsc::{Consumer, MpscRing, Producer};
-#[cfg(feature = "std")]
-pub use mpsc::{FanInSpout, PoolBuilder, WorkerPanic, WorkerPool};
 pub use ring::{Drain, SpillRing};
 pub use traits::{RingConsumer, RingInfo, RingProducer, RingTrait};

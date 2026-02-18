@@ -53,6 +53,8 @@ mod consumer;
 mod producer;
 
 #[cfg(feature = "std")]
+mod collector;
+#[cfg(feature = "std")]
 mod fan_in;
 #[cfg(feature = "std")]
 mod handoff;
@@ -61,6 +63,8 @@ mod pool;
 #[cfg(feature = "std")]
 mod sync;
 
+#[cfg(feature = "std")]
+pub use collector::{Collector, SequencedCollector, UnorderedCollector};
 pub use consumer::Consumer;
 #[cfg(feature = "std")]
 pub use fan_in::FanInSpout;

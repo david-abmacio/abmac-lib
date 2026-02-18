@@ -114,6 +114,20 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> HandoffS
         // reads the batch with Acquire.
         self.batch_seq.store(seq, Ordering::Release);
     }
+
+    /// Consumer: read the batch sequence number for the last published batch.
+    ///
+    /// Call after `collect()` returns `Some` — the Acquire on `batch.swap(null)`
+    /// transitively sees the seq stored by the main thread.
+    #[inline]
+    pub(crate) fn read_seq(&self) -> u64 {
+        // Ordering: Acquire — pairs with main thread's Release store.
+        // The happens-before chain: main Release(seq) → main Release(go) →
+        // worker Acquire(go) → worker Release(publish) → consumer Acquire(batch).
+        // This Acquire is technically redundant (the batch Acquire already
+        // provides the fence), but makes the dependency explicit.
+        self.batch_seq.load(Ordering::Acquire)
+    }
 }
 
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Drop

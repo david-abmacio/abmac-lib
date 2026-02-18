@@ -1,6 +1,7 @@
 extern crate std;
 
 mod producer_spout;
+mod sequenced;
 
 #[cfg(feature = "std")]
 mod std_spouts;

@@ -119,6 +119,10 @@ impl<E: Actionable> Context<E, Dynamic, spout::CollectSpout<Frame>> {
     /// When more than `max_frames` are added, the oldest frames are moved to
     /// an internal collection accessible via [`into_overflow`](Context::into_overflow).
     /// A `max_frames` of 0 is clamped to 1.
+    ///
+    /// **Note:** The overflow collection is unbounded — total memory usage is
+    /// not reduced, only the active frame window is limited. For true memory
+    /// bounding, use [`Context::bounded`] which drops evicted frames.
     #[must_use]
     pub fn bounded_collect(error: E, max_frames: usize) -> Self {
         let max_frames = max_frames.max(1);

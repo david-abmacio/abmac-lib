@@ -541,6 +541,152 @@ mod worker_pool_tests {
         assert_eq!(total, 400);
     }
 
+    // --- Feature 5: Multi-Stage Pipelines ---
+
+    #[test]
+    fn two_stage_pipeline() {
+        // Stage 1: 4 workers produce numbers.
+        // Stage 2: 2 workers double each number.
+        // Verify all items arrive correctly.
+
+        let mut stage1 = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
+            let base = id as u64 * 1000;
+            for i in 0..*count {
+                ring.push(base + i);
+            }
+        });
+
+        stage1.run(&50); // 4 workers * 50 = 200 items
+
+        let mut stage1_sink = CollectSpout::new();
+        stage1.collect(&mut stage1_sink).unwrap();
+        let stage1_items = stage1_sink.into_items();
+        assert_eq!(stage1_items.len(), 200);
+
+        // Stage 2: double each item, distributed round-robin across workers.
+        let input = stage1_items;
+        let mut stage2 = MpscRing::<u64, 256>::pool(2).spawn(|ring, id, batch: &Vec<u64>| {
+            for (i, &val) in batch.iter().enumerate() {
+                if i % 2 == id {
+                    ring.push(val * 2);
+                }
+            }
+        });
+
+        stage2.run(&input);
+
+        let mut final_sink = CollectSpout::new();
+        stage2.collect(&mut final_sink).unwrap();
+        let mut result = final_sink.into_items();
+        result.sort();
+
+        let mut expected: std::vec::Vec<u64> = input.iter().map(|x| x * 2).collect();
+        expected.sort();
+        assert_eq!(result, expected);
+    }
+
+    // --- Feature 6: MPSM ---
+
+    #[test]
+    fn mpsm_two_mergers() {
+        use crate::UnorderedCollector;
+
+        // 8 workers, 2 mergers. Each worker pushes its worker_id.
+        // Merger 0 collects workers {0, 2, 4, 6}.
+        // Merger 1 collects workers {1, 3, 5, 7}.
+        let mut pool = MpscRing::<u64, 256>::pool(8).spawn(|ring, id, _args: &()| {
+            ring.push(id as u64);
+        });
+
+        pool.run(&());
+
+        let mut all_items = std::vec::Vec::new();
+        pool.with_mergers(
+            2,
+            || UnorderedCollector::new(CollectSpout::new()),
+            |mergers| {
+                std::thread::scope(|s| {
+                    let handles: std::vec::Vec<_> = mergers
+                        .iter_mut()
+                        .map(|m| s.spawn(|| m.flush().unwrap()))
+                        .collect();
+                    for h in handles {
+                        h.join().unwrap();
+                    }
+                });
+                for merger in mergers.iter() {
+                    all_items.extend_from_slice(merger.collector().inner().items());
+                }
+            },
+        );
+
+        all_items.sort();
+        assert_eq!(all_items, std::vec![0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn mpsm_slot_partitioning() {
+        use crate::UnorderedCollector;
+
+        // 6 workers, 3 mergers. Verify round-robin:
+        // Merger 0: workers {0, 3}
+        // Merger 1: workers {1, 4}
+        // Merger 2: workers {2, 5}
+        let mut pool = MpscRing::<u64, 256>::pool(6).spawn(|ring, id, _args: &()| {
+            ring.push(id as u64);
+        });
+
+        pool.run(&());
+
+        pool.with_mergers(
+            3,
+            || UnorderedCollector::new(CollectSpout::new()),
+            |mergers| {
+                for merger in mergers.iter_mut() {
+                    merger.flush().unwrap();
+                }
+
+                let m0: std::vec::Vec<u64> = mergers[0].collector().inner().items().to_vec();
+                let m1: std::vec::Vec<u64> = mergers[1].collector().inner().items().to_vec();
+                let m2: std::vec::Vec<u64> = mergers[2].collector().inner().items().to_vec();
+
+                assert!(m0.contains(&0) && m0.contains(&3), "merger 0: {m0:?}");
+                assert!(m1.contains(&1) && m1.contains(&4), "merger 1: {m1:?}");
+                assert!(m2.contains(&2) && m2.contains(&5), "merger 2: {m2:?}");
+
+                assert_eq!(mergers[0].num_slots(), 2);
+                assert_eq!(mergers[1].num_slots(), 2);
+                assert_eq!(mergers[2].num_slots(), 2);
+            },
+        );
+    }
+
+    #[test]
+    fn mpsm_single_merger_equals_collect() {
+        use crate::UnorderedCollector;
+
+        // 1 merger over all slots should produce same result as collect().
+        let mut pool = MpscRing::<u64, 256>::pool(4).spawn(|ring, id, count: &u64| {
+            for i in 0..*count {
+                ring.push(id as u64 * 1000 + i);
+            }
+        });
+
+        pool.run(&100);
+
+        let mut merger_items = std::vec::Vec::new();
+        pool.with_mergers(
+            1,
+            || UnorderedCollector::new(CollectSpout::new()),
+            |mergers| {
+                mergers[0].flush().unwrap();
+                merger_items = mergers[0].collector().inner().items().to_vec();
+            },
+        );
+
+        assert_eq!(merger_items.len(), 400);
+    }
+
     // --- Feature 4: Backpressure ---
 
     #[test]

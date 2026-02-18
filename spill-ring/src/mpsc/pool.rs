@@ -20,6 +20,7 @@ use super::Consumer;
 use super::collector::Collector;
 use super::fan_in::FanInSpout;
 use super::handoff::{HandoffSlot, WorkerSignal};
+use super::merger::MergerHandle;
 use super::sync;
 
 /// Wrapper to send a raw pointer across thread boundaries.
@@ -485,6 +486,99 @@ where
 
         // SAFETY: Caller guarantees the pool outlives the returned FanInSpout.
         unsafe { FanInSpout::new(slot_ptrs, collector) }
+    }
+
+    /// Execute a closure with M [`MergerHandle`]s, each owning a subset
+    /// of handoff slots partitioned round-robin.
+    ///
+    /// Merger `i` gets slots `{i, i+M, i+2M, ...}`. The closure receives
+    /// a mutable slice of merger handles that can be sent to scoped threads
+    /// via [`std::thread::scope`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_mergers` is 0 or greater than the number of workers.
+    pub fn with_mergers<C, R>(
+        &mut self,
+        num_mergers: usize,
+        collector_factory: impl Fn() -> C,
+        f: impl FnOnce(&mut [MergerHandle<T, N, S, C>]) -> R,
+    ) -> R
+    where
+        C: Collector<T>,
+    {
+        assert!(num_mergers > 0, "need at least one merger");
+        assert!(
+            num_mergers <= self.num_workers,
+            "more mergers ({num_mergers}) than workers ({})",
+            self.num_workers
+        );
+
+        let mut mergers: Vec<MergerHandle<T, N, S, C>> = (0..num_mergers)
+            .map(|merger_id| {
+                // Round-robin: merger i gets slots {i, i+M, i+2M, ...}
+                let slot_ptrs: Box<[SendPtr<HandoffSlot<T, N, S>>]> = self
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .filter(|&(w, _)| w % num_mergers == merger_id)
+                    .map(|(_, slot)| SendPtr(core::ptr::from_ref(slot)))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+
+                let collector = collector_factory();
+                // SAFETY: Slot pointers valid for the closure duration.
+                let fan_in = unsafe { FanInSpout::new(slot_ptrs, collector) };
+                MergerHandle::new(fan_in, merger_id)
+            })
+            .collect();
+
+        f(&mut mergers)
+    }
+
+    /// Create M [`MergerHandle`]s with raw pointers to handoff slot subsets.
+    ///
+    /// # Safety
+    ///
+    /// Returned `MergerHandle`s must not outlive `self`. The caller must
+    /// ensure the pool is not dropped while any `MergerHandle` exists.
+    /// Prefer [`with_mergers()`](Self::with_mergers) for the safe scoped API.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_mergers` is 0 or greater than the number of workers.
+    pub unsafe fn mergers_unchecked<C>(
+        &self,
+        num_mergers: usize,
+        collector_factory: impl Fn() -> C,
+    ) -> Vec<MergerHandle<T, N, S, C>>
+    where
+        C: Collector<T>,
+    {
+        assert!(num_mergers > 0, "need at least one merger");
+        assert!(
+            num_mergers <= self.num_workers,
+            "more mergers ({num_mergers}) than workers ({})",
+            self.num_workers
+        );
+
+        (0..num_mergers)
+            .map(|merger_id| {
+                let slot_ptrs: Box<[SendPtr<HandoffSlot<T, N, S>>]> = self
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .filter(|&(w, _)| w % num_mergers == merger_id)
+                    .map(|(_, slot)| SendPtr(core::ptr::from_ref(slot)))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+
+                let collector = collector_factory();
+                // SAFETY: Caller guarantees the pool outlives the MergerHandles.
+                let fan_in = unsafe { FanInSpout::new(slot_ptrs, collector) };
+                MergerHandle::new(fan_in, merger_id)
+            })
+            .collect()
     }
 
     /// Run the work function on all workers with the given arguments.

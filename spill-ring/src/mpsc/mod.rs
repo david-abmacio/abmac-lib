@@ -46,6 +46,20 @@
 //! No tokens, no credits, no explicit flow control. The ring's finite
 //! capacity and the handoff slot's single-entry design create backpressure
 //! structurally.
+//!
+//! # Multi-Stage Pipelines
+//!
+//! Stages compose through the spout trait — each pool's output feeds the
+//! next stage's input via [`collect()`](WorkerPool::collect):
+//!
+//! ```text
+//! WorkerPool<Stage1> → collect() → WorkerPool<Stage2> → collect() → sink
+//! ```
+//!
+//! Each stage independently scales to its core allocation. The compiler
+//! monomorphizes the entire chain — zero dynamic dispatch. No `Pipeline`
+//! struct, no `Stage` trait, no runtime graph. The types compose, the
+//! user builds the graph, the compiler inlines.
 
 extern crate alloc;
 
@@ -59,6 +73,8 @@ mod fan_in;
 #[cfg(feature = "std")]
 mod handoff;
 #[cfg(feature = "std")]
+mod merger;
+#[cfg(feature = "std")]
 mod pool;
 #[cfg(feature = "std")]
 mod sync;
@@ -68,6 +84,8 @@ pub use collector::{Collector, SequencedCollector, UnorderedCollector};
 pub use consumer::Consumer;
 #[cfg(feature = "std")]
 pub use fan_in::FanInSpout;
+#[cfg(feature = "std")]
+pub use merger::MergerHandle;
 #[cfg(feature = "std")]
 pub use pool::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use producer::Producer;

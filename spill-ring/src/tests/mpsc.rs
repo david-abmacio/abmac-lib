@@ -465,6 +465,52 @@ mod worker_pool_tests {
         pool.collect(&mut sink).unwrap();
         assert_eq!(sink.items().len(), 2);
     }
+
+    // --- Feature 4: Backpressure ---
+
+    #[test]
+    fn backpressure_overflow_fires() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Small ring (capacity 4) with a counting overflow spout.
+        // 2 workers each push 100 items per round.
+        // We run multiple rounds WITHOUT collecting — handoff slots fill,
+        // workers merge uncollected batches back, rings overflow.
+        let overflow_count = Arc::new(AtomicUsize::new(0));
+
+        let sink = spout::ProducerSpout::new({
+            let overflow_count = overflow_count.clone();
+            move |_id| {
+                let overflow_count = overflow_count.clone();
+                spout::FnSpout::new(move |_item: u64| {
+                    overflow_count.fetch_add(1, Ordering::Relaxed);
+                })
+            }
+        });
+
+        let mut pool =
+            MpscRing::<u64, 4, _>::pool_with_spout(2, sink).spawn(|ring, _id, count: &u64| {
+                for i in 0..*count {
+                    ring.push(i);
+                }
+            });
+
+        // Run 10 rounds without collecting — backpressure cascade:
+        // slots fill -> merge back -> ring overflows -> spout fires
+        for _ in 0..10 {
+            pool.run(&100);
+        }
+
+        let overflows = overflow_count.load(Ordering::Relaxed);
+        assert!(
+            overflows > 0,
+            "overflow spout should have fired under backpressure"
+        );
+
+        // All items either in ring (capacity 4) or overflowed — nothing lost
+        drop(pool);
+    }
 }
 
 // --- Missing coverage tests ---

@@ -27,6 +27,25 @@
 //!     }
 //! });
 //! ```
+//!
+//! # Backpressure
+//!
+//! The TPC [`WorkerPool`] provides structural backpressure without explicit
+//! flow control protocols. When the consumer is slow, pressure propagates
+//! backward through the system automatically:
+//!
+//! 1. **Consumer slow** — [`collect()`](WorkerPool::collect) called less frequently
+//! 2. **Handoff slots fill** — published batches sit uncollected
+//! 3. **Workers detect** — next publish finds a non-null batch pointer
+//! 4. **Merge back** — worker merges uncollected batch into its active ring
+//! 5. **Ring fills** — accumulated items exceed ring capacity
+//! 6. **Overflow fires** — evicted items route to the overflow spout
+//!
+//! Each layer has a natural valve. The overflow spout is the pressure
+//! relief — configurable per ring (drop, collect, spill to disk).
+//! No tokens, no credits, no explicit flow control. The ring's finite
+//! capacity and the handoff slot's single-entry design create backpressure
+//! structurally.
 
 extern crate alloc;
 

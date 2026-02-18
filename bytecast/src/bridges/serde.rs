@@ -11,6 +11,7 @@ use crate::{FromBytes, ToBytes, ToBytesExt};
 /// Serialization format depends on the serde format:
 /// - Human-readable (JSON, TOML): bytes are base64-encoded as a string
 /// - Binary (bincode, postcard): bytes are written as a raw byte slice
+#[derive(Debug, Clone, PartialEq)]
 pub struct BytecastSerde<T>(pub T);
 
 impl<T> From<T> for BytecastSerde<T> {

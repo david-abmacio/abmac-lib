@@ -100,6 +100,12 @@ impl<E, Overflow: spout::Spout<Frame, Error = core::convert::Infallible>>
 /// Returns [`RetryOutcome::Permanent`] if the operation returns a non-retryable
 /// error, or [`RetryOutcome::Exhausted`] if all attempts produce retryable errors.
 ///
+/// # Context Retention
+///
+/// Only the **last** temporary attempt's context (frames, backtrace, overflow)
+/// is preserved. Prior attempts' context is dropped. If you need visibility
+/// into all attempts, use a custom retry loop with a collecting overflow spout.
+///
 /// # Example
 ///
 /// ```

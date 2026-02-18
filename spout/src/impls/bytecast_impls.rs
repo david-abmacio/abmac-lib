@@ -23,7 +23,7 @@ pub struct FramedSpout<S> {
 /// Fixed overhead per frame: serialized usize (always 8 bytes via bytecast) + u32 payload length.
 const FRAME_HEADER_SIZE: usize = match (<usize as ToBytes>::MAX_SIZE, <u32 as ToBytes>::MAX_SIZE) {
     (Some(a), Some(b)) => a + b,
-    _ => unreachable!(),
+    _ => panic!("usize and u32 must have known MAX_SIZE"),
 };
 
 impl<S> FramedSpout<S> {

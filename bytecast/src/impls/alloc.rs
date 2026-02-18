@@ -65,6 +65,13 @@ mod var_int {
                 });
             }
 
+            // On the 5th byte only 4 bits fit in a u32 — reject overflow.
+            if shift == 28 && byte > 0x0F {
+                return Err(BytesError::InvalidData {
+                    message: "var_int overflows u32",
+                });
+            }
+
             result |= ((byte & 0x7F) as u32) << shift;
 
             if byte < 0x80 {

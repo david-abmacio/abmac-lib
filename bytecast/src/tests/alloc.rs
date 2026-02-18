@@ -1,8 +1,8 @@
 use alloc::{borrow::Cow, string::String, vec, vec::Vec};
 
 use super::{
-    ByteCursor, ByteReader, ByteSerializer, FromBytes, FromBytesExt, ToBytes, ToBytesExt,
-    ZeroCopyType,
+    ByteCursor, ByteReader, ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes,
+    ToBytesExt, ZeroCopyType,
 };
 use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -434,6 +434,25 @@ fn test_tuple_mixed() {
     assert_eq!(decoded, value);
 
     assert_eq!(<(u32, String)>::MAX_SIZE, None);
+}
+
+#[test]
+fn test_varint_rejects_5th_byte_overflow() {
+    // 5th byte = 0x1F — bits 4-6 would overflow u32, must be rejected.
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x1F];
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_varint_accepts_5th_byte_within_range() {
+    // 5th byte = 0x0F is valid (uses exactly 4 bits for u32).
+    // Encodes u32::MAX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F].
+    // This claims u32::MAX elements so from_bytes will fail on length,
+    // but NOT on the varint decode itself. Verify we get UnexpectedEof, not InvalidData.
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(matches!(result, Err(BytesError::UnexpectedEof { .. })));
 }
 
 #[test]

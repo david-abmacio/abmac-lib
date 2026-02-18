@@ -363,7 +363,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     #[inline]
     pub fn push_and_flush(&mut self, item: T) {
         self.push_mut(item);
-        self.flush();
+        let _ = self.flush();
     }
 
     /// Flush all items to spout. Returns count flushed.
@@ -449,7 +449,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
     /// Clear all items from the buffer, flushing them to the spout.
     pub fn clear(&mut self) {
-        self.flush();
+        let _ = self.flush();
     }
 
     /// Shared reference to the spout.
@@ -551,7 +551,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Spout<T>
 
     #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
-        SpillRing::flush(self);
+        let _ = SpillRing::flush(self);
         Ok(())
     }
 }
@@ -566,7 +566,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Drop
     for SpillRing<T, N, S>
 {
     fn drop(&mut self) {
-        self.flush();
+        let _ = self.flush();
         let _ = self.sink.get_mut().flush();
     }
 }

@@ -108,6 +108,8 @@ impl<E: core::fmt::Display> core::fmt::Display for MutexSpoutError<E> {
     }
 }
 
+impl<E: core::fmt::Debug + core::fmt::Display> core::error::Error for MutexSpoutError<E> {}
+
 /// Thread-safe spout wrapper using `Arc<Mutex<S>>`.
 ///
 /// Allows multiple producers to share a single spout with mutex synchronization.

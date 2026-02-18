@@ -1,17 +1,19 @@
 //! ToBytes derive macro implementation.
 
 use super::{
-    disc_capacity, field_type_bounds, has_boxed_attr, has_skip_attr, reject_enum_field_attrs,
-    repr_int_type, resolve_discriminants, serializable_type, validate_struct_field_attrs,
+    disc_capacity, field_type_bounds, has_boxed_attr, has_skip_attr, parse_crate_path,
+    reject_enum_field_attrs, repr_int_type, resolve_discriminants, serializable_type,
+    validate_struct_field_attrs,
 };
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields};
 
 pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
+    let krate = parse_crate_path(&input.attrs)?;
     let name = &input.ident;
     let mut generics = input.generics.clone();
-    let extra_bounds = field_type_bounds(input, syn::parse_quote!(bytecast::ToBytes))?;
+    let extra_bounds = field_type_bounds(input, syn::parse_quote!(#krate::ToBytes))?;
     if !extra_bounds.is_empty() {
         generics.make_where_clause().predicates.extend(extra_bounds);
     }
@@ -21,18 +23,18 @@ pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         Data::Struct(data) => {
             validate_struct_field_attrs(&data.fields)?;
             (
-                generate_struct(&data.fields),
-                generate_byte_len_struct(&data.fields),
-                generate_max_size_struct(&data.fields)?,
+                generate_struct(&krate, &data.fields),
+                generate_byte_len_struct(&krate, &data.fields),
+                generate_max_size_struct(&krate, &data.fields)?,
             )
         }
         Data::Enum(data) => {
             let disc_ident = validate_enum(input, data)?;
             let disc_values = resolve_discriminants(data)?;
             (
-                generate_enum(data, &disc_ident, &disc_values),
-                generate_byte_len_enum(data, &disc_ident),
-                generate_max_size_enum(data, &disc_ident),
+                generate_enum(&krate, data, &disc_ident, &disc_values),
+                generate_byte_len_enum(&krate, data, &disc_ident),
+                generate_max_size_enum(&krate, data, &disc_ident),
             )
         }
         Data::Union(_) => {
@@ -44,10 +46,10 @@ pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     Ok(quote! {
-        impl #impl_generics bytecast::ToBytes for #name #ty_generics #where_clause {
+        impl #impl_generics #krate::ToBytes for #name #ty_generics #where_clause {
             const MAX_SIZE: Option<usize> = #max_size_body;
 
-            fn to_bytes(&self, buf: &mut [u8]) -> ::core::result::Result<usize, bytecast::BytesError> {
+            fn to_bytes(&self, buf: &mut [u8]) -> ::core::result::Result<usize, #krate::BytesError> {
                 let mut offset = 0usize;
                 #body
                 Ok(offset)
@@ -116,13 +118,13 @@ fn active_fields(fields: &Fields) -> Vec<(usize, &syn::Field)> {
     }
 }
 
-fn generate_struct(fields: &Fields) -> TokenStream2 {
+fn generate_struct(krate: &syn::Path, fields: &Fields) -> TokenStream2 {
     let writes: Vec<_> = active_fields(fields)
         .iter()
         .map(|&(i, f)| {
             let access = field_accessor(f, i);
             quote! {
-                let written = bytecast::ToBytes::to_bytes(&#access, &mut buf[offset..])?;
+                let written = #krate::ToBytes::to_bytes(&#access, &mut buf[offset..])?;
                 offset += written;
             }
         })
@@ -130,7 +132,7 @@ fn generate_struct(fields: &Fields) -> TokenStream2 {
     quote! { #(#writes)* }
 }
 
-fn generate_byte_len_struct(fields: &Fields) -> TokenStream2 {
+fn generate_byte_len_struct(krate: &syn::Path, fields: &Fields) -> TokenStream2 {
     let fields = active_fields(fields);
     if fields.is_empty() {
         return quote! { Some(0) };
@@ -139,13 +141,13 @@ fn generate_byte_len_struct(fields: &Fields) -> TokenStream2 {
         .iter()
         .map(|&(i, f)| {
             let access = field_accessor(f, i);
-            quote! { bytecast::ToBytes::byte_len(&#access)? }
+            quote! { #krate::ToBytes::byte_len(&#access)? }
         })
         .collect();
     quote! { Some(0 #(+ #lens)*) }
 }
 
-fn generate_max_size_struct(fields: &Fields) -> syn::Result<TokenStream2> {
+fn generate_max_size_struct(krate: &syn::Path, fields: &Fields) -> syn::Result<TokenStream2> {
     let fields = active_fields(fields);
     if fields.is_empty() {
         return Ok(quote! { Some(0) });
@@ -154,7 +156,7 @@ fn generate_max_size_struct(fields: &Fields) -> syn::Result<TokenStream2> {
         .iter()
         .map(|&(_, f)| {
             let ty = serializable_type(f)?;
-            Ok(quote! { <#ty as bytecast::ToBytes>::MAX_SIZE })
+            Ok(quote! { <#ty as #krate::ToBytes>::MAX_SIZE })
         })
         .collect::<syn::Result<_>>()?;
     Ok(quote! {
@@ -175,6 +177,7 @@ fn generate_max_size_struct(fields: &Fields) -> syn::Result<TokenStream2> {
 }
 
 fn generate_enum(
+    krate: &syn::Path,
     data: &syn::DataEnum,
     disc_type: &syn::Ident,
     disc_values: &[i128],
@@ -187,7 +190,7 @@ fn generate_enum(
             let variant_name = &variant.ident;
             let disc_lit = syn::LitInt::new(&disc_val.to_string(), proc_macro2::Span::call_site());
             let disc_write = quote! {
-                let written = bytecast::ToBytes::to_bytes(&(#disc_lit as #disc_type), &mut buf[offset..])?;
+                let written = #krate::ToBytes::to_bytes(&(#disc_lit as #disc_type), &mut buf[offset..])?;
                 offset += written;
             };
 
@@ -197,7 +200,7 @@ fn generate_enum(
                 },
                 Fields::Unnamed(fields) => {
                     let names = enum_field_names(fields.unnamed.len());
-                    let writes = enum_field_writes(&names);
+                    let writes = enum_field_writes(krate, &names);
                     quote! {
                         Self::#variant_name(#(#names),*) => {
                             #disc_write
@@ -207,7 +210,7 @@ fn generate_enum(
                 }
                 Fields::Named(fields) => {
                     let names: Vec<_> = fields.named.iter().map(|f| &f.ident).collect();
-                    let writes = enum_field_writes(&names);
+                    let writes = enum_field_writes(krate, &names);
                     quote! {
                         Self::#variant_name { #(#names),* } => {
                             #disc_write
@@ -222,7 +225,11 @@ fn generate_enum(
     quote! { match self { #(#match_arms)* } }
 }
 
-fn generate_byte_len_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> TokenStream2 {
+fn generate_byte_len_enum(
+    krate: &syn::Path,
+    data: &syn::DataEnum,
+    disc_type: &syn::Ident,
+) -> TokenStream2 {
     let match_arms: Vec<_> = data
         .variants
         .iter()
@@ -234,12 +241,12 @@ fn generate_byte_len_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> Token
                 }
                 Fields::Unnamed(fields) => {
                     let names = enum_field_names(fields.unnamed.len());
-                    let lens = enum_field_lens(&names);
+                    let lens = enum_field_lens(krate, &names);
                     quote! { Self::#variant_name(#(#names),*) => Some(core::mem::size_of::<#disc_type>() #(+ #lens)*) }
                 }
                 Fields::Named(fields) => {
                     let names: Vec<_> = fields.named.iter().map(|f| &f.ident).collect();
-                    let lens = enum_field_lens(&names);
+                    let lens = enum_field_lens(krate, &names);
                     quote! { Self::#variant_name { #(#names),* } => Some(core::mem::size_of::<#disc_type>() #(+ #lens)*) }
                 }
             }
@@ -249,7 +256,11 @@ fn generate_byte_len_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> Token
     quote! { match self { #(#match_arms),* } }
 }
 
-fn generate_max_size_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> TokenStream2 {
+fn generate_max_size_enum(
+    krate: &syn::Path,
+    data: &syn::DataEnum,
+    disc_type: &syn::Ident,
+) -> TokenStream2 {
     if data.variants.is_empty() {
         return quote! { Some(core::mem::size_of::<#disc_type>()) };
     }
@@ -267,7 +278,7 @@ fn generate_max_size_enum(data: &syn::DataEnum, disc_type: &syn::Ident) -> Token
                 .iter()
                 .map(|f| {
                     let ty = &f.ty;
-                    quote! { <#ty as bytecast::ToBytes>::MAX_SIZE }
+                    quote! { <#ty as #krate::ToBytes>::MAX_SIZE }
                 })
                 .collect()
         })
@@ -302,21 +313,21 @@ fn enum_field_names(count: usize) -> Vec<syn::Ident> {
         .collect()
 }
 
-fn enum_field_writes<T: quote::ToTokens>(names: &[T]) -> Vec<TokenStream2> {
+fn enum_field_writes<T: quote::ToTokens>(krate: &syn::Path, names: &[T]) -> Vec<TokenStream2> {
     names
         .iter()
         .map(|name| {
             quote! {
-                let written = bytecast::ToBytes::to_bytes(#name, &mut buf[offset..])?;
+                let written = #krate::ToBytes::to_bytes(#name, &mut buf[offset..])?;
                 offset += written;
             }
         })
         .collect()
 }
 
-fn enum_field_lens<T: quote::ToTokens>(names: &[T]) -> Vec<TokenStream2> {
+fn enum_field_lens<T: quote::ToTokens>(krate: &syn::Path, names: &[T]) -> Vec<TokenStream2> {
     names
         .iter()
-        .map(|name| quote! { bytecast::ToBytes::byte_len(#name)? })
+        .map(|name| quote! { #krate::ToBytes::byte_len(#name)? })
         .collect()
 }

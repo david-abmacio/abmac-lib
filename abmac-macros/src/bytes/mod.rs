@@ -6,6 +6,33 @@ mod to_bytes;
 pub use from_bytes::derive_impl as derive_from_bytes_impl;
 pub use to_bytes::derive_impl as derive_to_bytes_impl;
 
+/// Extract `#[bytecast(crate = "path")]` from type-level attributes.
+/// Defaults to `::bytecast` if not specified.
+pub fn parse_crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
+    for attr in attrs {
+        if !attr.path().is_ident("bytecast") {
+            continue;
+        }
+        let mut crate_path = None;
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("crate") {
+                let value = meta.value()?;
+                let lit: syn::LitStr = value.parse()?;
+                crate_path = Some(lit.parse::<syn::Path>()?);
+                Ok(())
+            } else {
+                // Ignore field-level attrs (skip, boxed) that appear here
+                // during Checkpoint derive which merges attribute namespaces.
+                Ok(())
+            }
+        })?;
+        if let Some(path) = crate_path {
+            return Ok(path);
+        }
+    }
+    Ok(syn::parse_quote!(::bytecast))
+}
+
 /// Extract the discriminant type from `#[repr(uN)]` on an enum.
 /// Returns `None` if no repr or a non-integer repr is used (defaults to u8).
 pub fn repr_int_type(attrs: &[syn::Attribute]) -> Option<syn::Ident> {

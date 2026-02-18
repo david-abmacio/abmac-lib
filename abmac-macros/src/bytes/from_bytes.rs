@@ -1,17 +1,19 @@
 //! FromBytes derive macro implementation.
 
 use super::{
-    disc_capacity, field_type_bounds, has_boxed_attr, has_skip_attr, reject_enum_field_attrs,
-    repr_int_type, resolve_discriminants, serializable_type, validate_struct_field_attrs,
+    disc_capacity, field_type_bounds, has_boxed_attr, has_skip_attr, parse_crate_path,
+    reject_enum_field_attrs, repr_int_type, resolve_discriminants, serializable_type,
+    validate_struct_field_attrs,
 };
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields};
 
 pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
+    let krate = parse_crate_path(&input.attrs)?;
     let name = &input.ident;
     let mut generics = input.generics.clone();
-    let extra_bounds = field_type_bounds(input, syn::parse_quote!(bytecast::FromBytes))?;
+    let extra_bounds = field_type_bounds(input, syn::parse_quote!(#krate::FromBytes))?;
     if !extra_bounds.is_empty() {
         generics.make_where_clause().predicates.extend(extra_bounds);
     }
@@ -20,7 +22,7 @@ pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let body = match &input.data {
         Data::Struct(data) => {
             validate_struct_field_attrs(&data.fields)?;
-            let (reads, constructor) = generate_struct(name, &data.fields)?;
+            let (reads, constructor) = generate_struct(&krate, name, &data.fields)?;
             quote! {
                 #reads
                 Ok((#constructor, offset))
@@ -29,7 +31,7 @@ pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
         Data::Enum(data) => {
             let disc_ident = validate_enum(input, data)?;
             let disc_values = resolve_discriminants(data)?;
-            generate_enum(name, data, &disc_ident, &disc_values)
+            generate_enum(&krate, name, data, &disc_ident, &disc_values)
         }
         Data::Union(_) => {
             return Err(syn::Error::new_spanned(
@@ -40,8 +42,8 @@ pub fn derive_impl(input: &DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     Ok(quote! {
-        impl #impl_generics bytecast::FromBytes for #name #ty_generics #where_clause {
-            fn from_bytes(buf: &[u8]) -> ::core::result::Result<(Self, usize), bytecast::BytesError> {
+        impl #impl_generics #krate::FromBytes for #name #ty_generics #where_clause {
+            fn from_bytes(buf: &[u8]) -> ::core::result::Result<(Self, usize), #krate::BytesError> {
                 let mut offset = 0usize;
                 #body
             }
@@ -70,7 +72,11 @@ fn validate_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<syn::
 }
 
 /// Generate a read statement for a single struct field.
-fn field_read(field: &syn::Field, var_name: &syn::Ident) -> syn::Result<TokenStream2> {
+fn field_read(
+    krate: &syn::Path,
+    field: &syn::Field,
+    var_name: &syn::Ident,
+) -> syn::Result<TokenStream2> {
     let field_type = &field.ty;
 
     if has_skip_attr(field) {
@@ -79,7 +85,7 @@ fn field_read(field: &syn::Field, var_name: &syn::Ident) -> syn::Result<TokenStr
 
     let ser_type = serializable_type(field)?;
     let read = quote! {
-        let (val, consumed) = <#ser_type as bytecast::FromBytes>::from_bytes(&buf[offset..])?;
+        let (val, consumed) = <#ser_type as #krate::FromBytes>::from_bytes(&buf[offset..])?;
         offset += consumed;
     };
 
@@ -91,6 +97,7 @@ fn field_read(field: &syn::Field, var_name: &syn::Ident) -> syn::Result<TokenStr
 }
 
 fn generate_struct(
+    krate: &syn::Path,
     name: &syn::Ident,
     fields: &Fields,
 ) -> syn::Result<(TokenStream2, TokenStream2)> {
@@ -101,7 +108,7 @@ fn generate_struct(
                 .iter()
                 .map(|f| {
                     let var = f.ident.clone().unwrap();
-                    field_read(f, &var)
+                    field_read(krate, f, &var)
                 })
                 .collect::<syn::Result<_>>()?;
             let field_names: Vec<_> = named.named.iter().map(|f| &f.ident).collect();
@@ -118,7 +125,7 @@ fn generate_struct(
                 .unnamed
                 .iter()
                 .zip(&var_names)
-                .map(|(f, var)| field_read(f, var))
+                .map(|(f, var)| field_read(krate, f, var))
                 .collect::<syn::Result<_>>()?;
             Ok((quote! { #(#reads)* }, quote! { #name(#(#var_names),*) }))
         }
@@ -127,6 +134,7 @@ fn generate_struct(
 }
 
 fn generate_enum(
+    krate: &syn::Path,
     name: &syn::Ident,
     data: &syn::DataEnum,
     disc_type: &syn::Ident,
@@ -152,7 +160,7 @@ fn generate_enum(
                         .map(|(f, var)| {
                             let ty = &f.ty;
                             quote! {
-                                let (#var, consumed) = <#ty as bytecast::FromBytes>::from_bytes(&buf[offset..])?;
+                                let (#var, consumed) = <#ty as #krate::FromBytes>::from_bytes(&buf[offset..])?;
                                 offset += consumed;
                             }
                         })
@@ -171,7 +179,7 @@ fn generate_enum(
                             let field_name = &f.ident;
                             let ty = &f.ty;
                             quote! {
-                                let (#field_name, consumed) = <#ty as bytecast::FromBytes>::from_bytes(&buf[offset..])?;
+                                let (#field_name, consumed) = <#ty as #krate::FromBytes>::from_bytes(&buf[offset..])?;
                                 offset += consumed;
                             }
                         })
@@ -188,12 +196,12 @@ fn generate_enum(
         .collect();
 
     quote! {
-        let (discriminant, consumed) = <#disc_type as bytecast::FromBytes>::from_bytes(&buf[offset..])?;
+        let (discriminant, consumed) = <#disc_type as #krate::FromBytes>::from_bytes(&buf[offset..])?;
         offset += consumed;
 
         match discriminant {
             #(#match_arms,)*
-            _ => Err(bytecast::BytesError::InvalidData {
+            _ => Err(#krate::BytesError::InvalidData {
                 message: "invalid enum discriminant"
             })
         }

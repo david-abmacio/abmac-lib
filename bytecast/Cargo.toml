@@ -1,33 +1,22 @@
 [package]
 name = "bytecast"
 version = "1.0.0"
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-description = "Fast, simple byte serialization for Rust. no_std compatible with zerocopy internals."
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Fast, simple byte serialization for Rust. no_std compatible with little-endian wire format."
+repository = "https://github.com/abmac-io/abmac-lib"
 documentation = "https://docs.rs/bytecast"
 readme = "README.md"
 keywords = ["bytes", "serialization", "little-endian", "no_std", "embedded"]
 categories = ["encoding", "no-std", "embedded"]
 
 [dependencies]
-abmac-macros = { path = "../abmac-macros", default-features = false, features = [
-  "bytecast",
-], optional = true }
-serde = { version = "1", default-features = false, features = [
-  "derive",
-  "alloc",
-], optional = true }
-base64 = { version = "0.22", default-features = false, features = [
-  "alloc",
-], optional = true }
-facet = { version = "0.43", default-features = false, features = [
-  "alloc",
-], optional = true }
-rkyv = { version = "0.8", default-features = false, features = [
-  "alloc",
-], optional = true }
+abmac-macros = { path = "../abmac-macros", default-features = false, features = ["bytecast"], optional = true }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
+base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
+facet = { version = "0.43", default-features = false, features = ["alloc"], optional = true }
+rkyv = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"

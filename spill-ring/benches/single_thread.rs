@@ -79,15 +79,13 @@ fn push_mut_collect_spout(c: &mut Criterion) {
             &capacity,
             |b, &cap| match cap {
                 16 => b.iter(|| {
-                    let mut ring: SpillRing<u64, 16, _> =
-                        SpillRing::builder().spout(CollectSpout::new()).build();
+                    let mut ring: SpillRing<u64, 16, _> = SpillRing::builder().spout(CollectSpout::new()).build();
                     for i in 0..10_000u64 {
                         ring.push_mut(black_box(i));
                     }
                 }),
                 64 => b.iter(|| {
-                    let mut ring: SpillRing<u64, 64, _> =
-                        SpillRing::builder().spout(CollectSpout::new()).build();
+                    let mut ring: SpillRing<u64, 64, _> = SpillRing::builder().spout(CollectSpout::new()).build();
                     for i in 0..10_000u64 {
                         ring.push_mut(black_box(i));
                     }

@@ -39,7 +39,10 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Consumer
     /// Drain all items from all rings into a spout.
     ///
     /// Items are drained in producer order, then FIFO within each producer.
-    pub fn drain<Out: Spout<T, Error = core::convert::Infallible>>(&mut self, spout: &mut Out) {
+    pub fn drain<Out: Spout<T, Error = core::convert::Infallible>>(
+        &mut self,
+        spout: &mut Out,
+    ) {
         for ring in &mut self.rings {
             let _ = spout.send_all(ring.drain());
         }

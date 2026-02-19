@@ -85,11 +85,11 @@ fn test_remove_from_storage() {
     as_cold(&mut cold).flush().unwrap();
 
     assert!(as_cold(&mut cold).contains(1));
-    assert!(as_cold(&mut cold).remove(1).unwrap());
+    assert_eq!(as_cold(&mut cold).remove(1).unwrap(), true);
     assert!(!as_cold(&mut cold).contains(1));
 
     // Removing again returns false.
-    assert!(!as_cold(&mut cold).remove(1).unwrap());
+    assert_eq!(as_cold(&mut cold).remove(1).unwrap(), false);
 }
 
 #[test]

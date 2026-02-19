@@ -4,7 +4,7 @@ use verdict::{Actionable, ErrorStatusValue};
 
 use crate::dag::DAGError;
 use crate::game::PebbleError;
-use crate::manager::PebbleManagerError;
+use crate::manager::{BranchError, DirectStorageError, PebbleManagerError};
 use crate::storage::StorageError;
 
 impl Actionable for StorageError {
@@ -29,6 +29,21 @@ impl Actionable for PebbleError {
             PebbleError::FastMemoryExhausted { .. } => ErrorStatusValue::Temporary,
             _ => ErrorStatusValue::Permanent,
         }
+    }
+}
+
+impl Actionable for DirectStorageError {
+    fn status_value(&self) -> ErrorStatusValue {
+        match self {
+            DirectStorageError::Serializer { .. } => ErrorStatusValue::Permanent,
+            DirectStorageError::Storage { source } => source.status_value(),
+        }
+    }
+}
+
+impl Actionable for BranchError {
+    fn status_value(&self) -> ErrorStatusValue {
+        ErrorStatusValue::Permanent
     }
 }
 

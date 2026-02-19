@@ -224,7 +224,12 @@ impl FailingCold {
 impl ColdTier<TestCheckpoint> for FailingCold {
     type Error = DirectStorageError;
 
-    fn store(&mut self, id: u64, checkpoint: &TestCheckpoint) -> Result<(), Self::Error> {
+    fn store(
+        &mut self,
+        id: u64,
+        checkpoint: &TestCheckpoint,
+        deps: &[u64],
+    ) -> Result<(), Self::Error> {
         let r = self.remaining.get();
         if r == 0 {
             return Err(DirectStorageError::Storage {
@@ -232,7 +237,7 @@ impl ColdTier<TestCheckpoint> for FailingCold {
             });
         }
         self.remaining.set(r - 1);
-        self.inner.store(id, checkpoint)
+        self.inner.store(id, checkpoint, deps)
     }
 
     fn load(&self, id: u64) -> Result<TestCheckpoint, Self::Error> {

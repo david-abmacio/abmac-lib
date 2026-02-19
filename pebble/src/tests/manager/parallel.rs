@@ -25,7 +25,7 @@ fn test_store_and_load() {
         id: 1,
         data: "hello".into(),
     };
-    as_cold(&mut cold).store(1, &cp).unwrap();
+    as_cold(&mut cold).store(1, &cp, &[]).unwrap();
     as_cold(&mut cold).flush().unwrap();
 
     let loaded: TestCheckpoint = as_cold(&mut cold).load(1).unwrap();
@@ -40,7 +40,7 @@ fn test_contains_after_flush() {
         id: 1,
         data: "data".into(),
     };
-    as_cold(&mut cold).store(1, &cp).unwrap();
+    as_cold(&mut cold).store(1, &cp, &[]).unwrap();
 
     // Pending items aren't visible to contains until flushed.
     assert!(!as_cold(&mut cold).contains(1));
@@ -64,6 +64,7 @@ fn test_buffered_count() {
                     id: i,
                     data: alloc::format!("d{i}"),
                 },
+                &[],
             )
             .unwrap();
     }
@@ -80,7 +81,7 @@ fn test_remove_from_storage() {
         id: 1,
         data: "removeme".into(),
     };
-    as_cold(&mut cold).store(1, &cp).unwrap();
+    as_cold(&mut cold).store(1, &cp, &[]).unwrap();
     as_cold(&mut cold).flush().unwrap();
 
     assert!(as_cold(&mut cold).contains(1));
@@ -105,6 +106,7 @@ fn test_batch_distribution() {
                     id: i,
                     data: alloc::format!("d{i}"),
                 },
+                &[],
             )
             .unwrap();
     }
@@ -167,6 +169,7 @@ fn test_multi_flush_cycles() {
                     id: i,
                     data: alloc::format!("cycle1_{i}"),
                 },
+                &[],
             )
             .unwrap();
     }
@@ -189,6 +192,7 @@ fn test_multi_flush_cycles() {
                     id: i,
                     data: alloc::format!("cycle2_{i}"),
                 },
+                &[],
             )
             .unwrap();
     }

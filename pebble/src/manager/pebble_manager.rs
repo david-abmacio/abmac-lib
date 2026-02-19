@@ -491,7 +491,10 @@ where
     pub fn flush(&mut self) -> Result<(), T::Id, C::Error> {
         // Drain warm tier to cold. Collect first so a mid-iteration
         // failure doesn't lose items that haven't been stored yet.
+        // Sort by DAG creation_time so parents are stored before children
+        // (recovery validates dependency ordering by storage timestamp).
         let mut pending: Vec<(T::Id, T)> = self.warm.drain().collect();
+        pending.sort_by_key(|(id, _)| self.dag.get_node(*id).map_or(0, |n| n.creation_time()));
         for i in 0..pending.len() {
             let (id, ref checkpoint) = pending[i];
 
@@ -515,7 +518,12 @@ where
         // red_pebbles for fast access but are now also in cold for
         // durability. We don't add to blue_pebbles to avoid double-counting
         // in stats — recovery uses iter_metadata(), not blue_pebbles.
-        let dirty_ids: Vec<T::Id> = self.dirty.drain().collect();
+        //
+        // Sort by DAG creation_time so parents are stored before children.
+        // Recovery sorts by storage timestamp and validates that
+        // dependencies exist, so misordered stores cause integrity errors.
+        let mut dirty_ids: Vec<T::Id> = self.dirty.drain().collect();
+        dirty_ids.sort_by_key(|id| self.dag.get_node(*id).map_or(0, |n| n.creation_time()));
         for id in dirty_ids {
             // Cannot use persist_to_cold here: red_pebbles borrow would
             // conflict with &mut self. Manifest + store are called inline.
@@ -528,7 +536,7 @@ where
                 .map(|n| n.dependencies())
                 .unwrap_or(&[]);
             self.manifest.record(id, deps)?;
-            if let Err(e) = self.cold.store(id, checkpoint) {
+            if let Err(e) = self.cold.store(id, checkpoint, deps) {
                 // Compensating tombstone for the write-ahead manifest entry.
                 self.manifest.record_tombstone(id);
                 return Err(PebbleManagerError::Serialization {
@@ -734,7 +742,7 @@ where
             .map(|n| n.dependencies())
             .unwrap_or(&[]);
         self.manifest.record(id, deps)?;
-        if let Err(e) = self.cold.store(id, checkpoint) {
+        if let Err(e) = self.cold.store(id, checkpoint, deps) {
             // Cold store failed after the write-ahead manifest entry.
             // Append a compensating tombstone so recovery doesn't think
             // this checkpoint is in cold storage.

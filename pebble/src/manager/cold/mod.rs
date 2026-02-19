@@ -41,8 +41,8 @@ pub trait ColdTier<T: Checkpointable> {
     /// Error type for storage operations.
     type Error: core::fmt::Debug + core::fmt::Display;
 
-    /// Serialize and store a checkpoint.
-    fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error>;
+    /// Serialize and store a checkpoint with its dependency list.
+    fn store(&mut self, id: T::Id, checkpoint: &T, deps: &[T::Id]) -> Result<(), Self::Error>;
 
     /// Load and deserialize a checkpoint from storage.
     ///

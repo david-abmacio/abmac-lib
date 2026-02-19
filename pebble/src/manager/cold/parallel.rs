@@ -25,33 +25,33 @@ use super::{ColdTier, RecoverableColdTier};
 
 /// Batch of already-serialized checkpoints to distribute across workers.
 struct IoBatch<CId> {
-    items: Vec<(CId, Vec<u8>)>,
+    items: Vec<(CId, Vec<u8>, Vec<CId>)>,
     num_workers: usize,
 }
 
 /// Each worker iterates the batch, pushes items assigned to it
 /// (round-robin by index) into its ring. Overflow spills to storage.
 fn io_work<CId, const N: usize, S>(
-    ring: &SpillRing<(CId, Vec<u8>), N, S>,
+    ring: &SpillRing<(CId, Vec<u8>, Vec<CId>), N, S>,
     worker_id: usize,
     batch: &IoBatch<CId>,
 ) where
     CId: Copy + Send,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible>,
 {
-    for (i, (id, bytes)) in batch.items.iter().enumerate() {
+    for (i, (id, bytes, deps)) in batch.items.iter().enumerate() {
         if i % batch.num_workers != worker_id {
             continue;
         }
-        ring.push((*id, bytes.clone()));
+        ring.push((*id, bytes.clone(), deps.clone()));
     }
 }
 
 type IoPool<CId, const N: usize, S> = spill_ring::WorkerPool<
-    (CId, Vec<u8>),
+    (CId, Vec<u8>, Vec<CId>),
     N,
     S,
-    fn(&SpillRing<(CId, Vec<u8>), N, S>, usize, &IoBatch<CId>),
+    fn(&SpillRing<(CId, Vec<u8>, Vec<CId>), N, S>, usize, &IoBatch<CId>),
     IoBatch<CId>,
 >;
 
@@ -72,19 +72,19 @@ type IoPool<CId, const N: usize, S> = spill_ring::WorkerPool<
 pub struct ParallelCold<CId, S, const N: usize>
 where
     CId: Copy + Send + Sync + 'static,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible> + Clone + Send + 'static,
 {
     storage: S,
     pool: Option<IoPool<CId, N, S>>,
     num_workers: usize,
     /// Serialized items accumulated between `store()` calls.
-    pending: Vec<(CId, Vec<u8>)>,
+    pending: Vec<(CId, Vec<u8>, Vec<CId>)>,
 }
 
 impl<CId, S, const N: usize> ParallelCold<CId, S, N>
 where
     CId: Copy + Send + Sync + 'static,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible> + Clone + Send + 'static,
 {
     /// Create a new parallel cold tier.
     pub fn new(storage: S, num_workers: usize) -> Self {
@@ -113,7 +113,7 @@ where
     }
 
     fn create_pool(num_workers: usize, storage: S) -> IoPool<CId, N, S> {
-        MpscRing::<(CId, Vec<u8>), N, S>::pool_with_spout(num_workers, storage)
+        MpscRing::<(CId, Vec<u8>, Vec<CId>), N, S>::pool_with_spout(num_workers, storage)
             .spawn(io_work::<CId, N, S>)
     }
 
@@ -134,7 +134,10 @@ where
             // batches back into their active rings, where items accumulate
             // until the next collect() — potentially past the ring's
             // capacity, triggering unnecessary spout overflow.
-            pool.collect(&mut self.storage).unwrap();
+            match pool.collect(&mut self.storage) {
+                Ok(_) => {}
+                Err(e) => match e {},
+            }
             pool.run(&batch);
         }
     }
@@ -144,7 +147,7 @@ impl<T, S, const N: usize> ColdTier<T> for ParallelCold<T::Id, S, N>
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Send + Sync + 'static,
-    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>), Error = core::convert::Infallible>
         + CheckpointLoader<T::Id>
         + CheckpointRemover<T::Id>
         + Clone
@@ -153,13 +156,13 @@ where
 {
     type Error = DirectStorageError;
 
-    fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
+    fn store(&mut self, id: T::Id, checkpoint: &T, deps: &[T::Id]) -> Result<(), Self::Error> {
         // Serialize eagerly on the caller's thread.
         let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
 
-        self.pending.push((id, bytes));
+        self.pending.push((id, bytes, deps.to_vec()));
         // Distribute to workers when we have enough items to keep them busy.
         if self.pending.len() >= self.num_workers {
             self.run_batch();
@@ -185,7 +188,10 @@ where
         // Drain handoff slots directly to storage. The pool stays alive —
         // no thread teardown/respawn, no ring reallocation.
         if let Some(pool) = self.pool.as_mut() {
-            pool.collect(&mut self.storage).unwrap();
+            match pool.collect(&mut self.storage) {
+                Ok(_) => {}
+                Err(e) => match e {},
+            }
         }
         Ok(())
     }
@@ -204,7 +210,7 @@ impl<T, S, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SI
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash + Send + Sync + 'static,
-    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>), Error = core::convert::Infallible>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>
         + CheckpointRemover<T::Id>
         + Clone
@@ -261,7 +267,7 @@ where
 impl<CId, S, const N: usize> Drop for ParallelCold<CId, S, N>
 where
     CId: Copy + Send + Sync + 'static,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible> + Clone + Send + 'static,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible> + Clone + Send + 'static,
 {
     fn drop(&mut self) {
         debug_assert!(

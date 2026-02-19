@@ -34,16 +34,16 @@ use super::{ColdTier, RecoverableColdTier};
 /// - `N` — Ring buffer capacity (const generic)
 pub struct RingCold<
     CId,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible>,
     const N: usize,
 > {
-    ring: SpillRing<(CId, Vec<u8>), N, S>,
+    ring: SpillRing<(CId, Vec<u8>, Vec<CId>), N, S>,
 }
 
 impl<CId, S, const N: usize> RingCold<CId, S, N>
 where
     CId: Copy,
-    S: Spout<(CId, Vec<u8>), Error = core::convert::Infallible>,
+    S: Spout<(CId, Vec<u8>, Vec<CId>), Error = core::convert::Infallible>,
 {
     /// Create a new ring-buffered cold tier.
     pub fn new(storage: S) -> Self {
@@ -66,17 +66,17 @@ where
 impl<T, S, const N: usize> ColdTier<T> for RingCold<T::Id, S, N>
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
-    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>), Error = core::convert::Infallible>
         + CheckpointLoader<T::Id>
         + CheckpointRemover<T::Id>,
 {
     type Error = DirectStorageError;
 
-    fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
+    fn store(&mut self, id: T::Id, checkpoint: &T, deps: &[T::Id]) -> Result<(), Self::Error> {
         let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
-        self.ring.push_mut((id, bytes));
+        self.ring.push_mut((id, bytes, deps.to_vec()));
         Ok(())
     }
 
@@ -111,7 +111,7 @@ impl<T, S, SId, const N: usize, const MAX_DEPS: usize> RecoverableColdTier<T, SI
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
-    S: Spout<(T::Id, Vec<u8>), Error = core::convert::Infallible>
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>), Error = core::convert::Infallible>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>
         + CheckpointRemover<T::Id>,
     SId: SessionId,

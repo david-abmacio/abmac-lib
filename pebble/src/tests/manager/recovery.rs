@@ -128,4 +128,15 @@ fn test_recover_with_dependencies() {
     assert_eq!(result.mode, RecoveryMode::WarmRestart);
     assert!(result.integrity_errors.is_empty());
     assert_eq!(recovered_manager.len(), in_cold);
+
+    // Verify that DAG edges were recovered — not just nodes.
+    // Checkpoint 1 depends on 0, checkpoint 2 depends on 1.
+    let deps_1 = recovered_manager.dependencies(1);
+    assert_eq!(deps_1, Some(&[0u64][..]), "checkpoint 1 should depend on 0");
+
+    let deps_2 = recovered_manager.dependencies(2);
+    assert_eq!(deps_2, Some(&[1u64][..]), "checkpoint 2 should depend on 1");
+
+    let deps_0 = recovered_manager.dependencies(0);
+    assert_eq!(deps_0, Some(&[][..]), "checkpoint 0 should have no deps");
 }

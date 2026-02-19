@@ -72,22 +72,55 @@ where
             ));
         }
 
-        // Sort by timestamp to ensure dependencies are processed first
-        checkpoints.sort_by_key(|(_, meta)| meta.creation_timestamp);
-
+        // Process checkpoints in dependency order. A checkpoint can
+        // only be loaded once all its dependencies have been loaded.
+        // Iterate in rounds: each round processes checkpoints whose
+        // deps are satisfied. Stop when no progress is made — any
+        // remaining items have genuinely missing dependencies.
         let mut integrity_errors = Vec::new();
         let mut checkpoints_loaded = 0;
         let mut dag_nodes_rebuilt = 0;
         let mut latest_state_id: Option<T::Id> = None;
 
-        for (state_id, metadata) in checkpoints {
-            match manager.recover_checkpoint(state_id, &metadata) {
-                Ok(()) => {
-                    checkpoints_loaded += 1;
-                    dag_nodes_rebuilt += 1;
-                    latest_state_id = Some(state_id);
+        // Sort by timestamp as a tiebreaker within each round so
+        // the "latest" checkpoint is deterministic.
+        checkpoints.sort_by_key(|(_, meta)| meta.creation_timestamp);
+
+        let mut remaining = checkpoints;
+        loop {
+            let before = remaining.len();
+            let mut deferred = Vec::new();
+
+            for (state_id, metadata) in remaining {
+                match manager.recover_checkpoint(state_id, &metadata) {
+                    Ok(()) => {
+                        checkpoints_loaded += 1;
+                        dag_nodes_rebuilt += 1;
+                        latest_state_id = Some(state_id);
+                    }
+                    Err(_) => {
+                        // Defer — deps may appear in a later round.
+                        deferred.push((state_id, metadata));
+                    }
                 }
-                Err(err) => integrity_errors.push(err),
+            }
+
+            remaining = deferred;
+
+            // No progress — remaining items have genuinely missing deps.
+            if remaining.len() == before {
+                break;
+            }
+            // All done.
+            if remaining.is_empty() {
+                break;
+            }
+        }
+
+        // Any items still remaining have unresolvable dependency errors.
+        for (state_id, metadata) in &remaining {
+            if let Err(err) = manager.recover_checkpoint(*state_id, metadata) {
+                integrity_errors.push(err);
             }
         }
 

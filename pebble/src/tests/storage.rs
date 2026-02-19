@@ -27,7 +27,7 @@ fn send_and_load() {
     let data = b"checkpoint data".to_vec();
 
     // Send via Spout
-    storage.send((1, data.clone()));
+    storage.send((1, data.clone(), vec![]));
 
     // Load via CheckpointLoader
     let loaded = storage.load(1).unwrap();
@@ -46,7 +46,7 @@ fn contains_check() {
     let mut storage = InMemoryStorage::<u64, u128, 8>::new();
 
     assert!(!storage.contains(1));
-    storage.send((1, vec![1, 2, 3]));
+    storage.send((1, vec![1, 2, 3], vec![]));
     assert!(storage.contains(1));
 }
 
@@ -54,7 +54,7 @@ fn contains_check() {
 fn remove_checkpoint() {
     let mut storage = InMemoryStorage::<u64, u128, 8>::new();
 
-    storage.send((1, vec![1, 2, 3]));
+    storage.send((1, vec![1, 2, 3], vec![]));
     assert_eq!(storage.len(), 1);
 
     let removed = storage.remove(1);
@@ -132,7 +132,7 @@ fn session_id_no_tracking() {
 
     // Storage with no session tracking
     let mut storage = InMemoryStorage::<u64, (), 4>::new();
-    storage.send((1, vec![1, 2, 3]));
+    storage.send((1, vec![1, 2, 3], vec![]));
     assert_eq!(storage.len(), 1);
 }
 
@@ -161,7 +161,7 @@ fn generic_checkpoint_id_u128() {
     let mut storage = InMemoryStorage::<u128, u128, 8>::new();
 
     let large_id: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
-    storage.send((large_id, vec![1, 2, 3]));
+    storage.send((large_id, vec![1, 2, 3], vec![]));
 
     assert!(storage.contains(large_id));
     let loaded = storage.load(large_id).unwrap();

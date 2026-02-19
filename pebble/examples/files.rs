@@ -42,10 +42,10 @@ impl FileStorage {
     }
 }
 
-impl Spout<(u64, Vec<u8>)> for FileStorage {
+impl Spout<(u64, Vec<u8>, Vec<u64>)> for FileStorage {
     type Error = core::convert::Infallible;
 
-    fn send(&mut self, (id, bytes): (u64, Vec<u8>)) -> Result<(), Self::Error> {
+    fn send(&mut self, (id, bytes, _deps): (u64, Vec<u8>, Vec<u64>)) -> Result<(), Self::Error> {
         let path = self.path_for(id);
         fs::write(&path, &bytes).expect("write checkpoint file");
         self.written.insert(id, ());

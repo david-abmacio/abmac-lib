@@ -68,15 +68,20 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
 }
 
 impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
-    Spout<(CId, Vec<u8>)> for InMemoryStorage<CId, SId, MAX_DEPS>
+    Spout<(CId, Vec<u8>, Vec<CId>)> for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     type Error = core::convert::Infallible;
 
-    fn send(&mut self, item: (CId, Vec<u8>)) -> Result<(), Self::Error> {
-        let (state_id, data) = item;
+    fn send(&mut self, item: (CId, Vec<u8>, Vec<CId>)) -> Result<(), Self::Error> {
+        let (state_id, data, deps) = item;
         let ts = self.next_timestamp;
         self.next_timestamp = ts.wrapping_add(1);
-        let metadata = CheckpointMetadata::new(state_id, ts, SId::default());
+        // with_dependencies can only fail if deps.len() > MAX_DEPS.
+        // ColdTier callers are bounded by the same MAX_DEPS, so this
+        // is safe to unwrap. Use expect for a clear message if it
+        // ever fires in a misconfigured setup.
+        let metadata = CheckpointMetadata::with_dependencies(state_id, &deps, ts, SId::default())
+            .expect("dependency count exceeds MAX_DEPS");
         self.store_with_metadata(state_id, data, metadata);
         Ok(())
     }

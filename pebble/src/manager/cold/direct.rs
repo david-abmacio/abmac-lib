@@ -75,15 +75,15 @@ impl DirectStorage<crate::storage::InMemoryStorage> {
 impl<T, S> ColdTier<T> for DirectStorage<S>
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
-    S: Spout<(T::Id, Vec<u8>)> + CheckpointLoader<T::Id> + CheckpointRemover<T::Id>,
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>)> + CheckpointLoader<T::Id> + CheckpointRemover<T::Id>,
 {
     type Error = DirectStorageError;
 
-    fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error> {
+    fn store(&mut self, id: T::Id, checkpoint: &T, deps: &[T::Id]) -> Result<(), Self::Error> {
         let bytes = ByteSerializer
             .serialize(checkpoint)
             .map_err(|source| DirectStorageError::Serializer { source })?;
-        let _ = self.storage.send((id, bytes));
+        let _ = self.storage.send((id, bytes, deps.to_vec()));
         Ok(())
     }
 
@@ -116,7 +116,7 @@ impl<T, S, SId, const MAX_DEPS: usize> RecoverableColdTier<T, SId, MAX_DEPS> for
 where
     T: Checkpointable + bytecast::ToBytes + bytecast::FromBytes,
     T::Id: Hash,
-    S: Spout<(T::Id, Vec<u8>)>
+    S: Spout<(T::Id, Vec<u8>, Vec<T::Id>)>
         + RecoverableStorage<T::Id, SId, MAX_DEPS>
         + CheckpointRemover<T::Id>,
     SId: SessionId,

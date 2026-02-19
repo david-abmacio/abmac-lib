@@ -155,6 +155,67 @@ fn test_manager_eviction_to_parallel() {
 }
 
 #[test]
+fn test_multi_flush_cycles() {
+    let mut cold = test_parallel_cold(2);
+
+    // First cycle: store and flush.
+    for i in 0..4 {
+        as_cold(&mut cold)
+            .store(
+                i,
+                &TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("cycle1_{i}"),
+                },
+            )
+            .unwrap();
+    }
+    as_cold(&mut cold).flush().unwrap();
+
+    // All first-cycle items in storage.
+    for i in 0..4 {
+        assert!(
+            cold.storage().contains(i),
+            "missing checkpoint {i} after first flush"
+        );
+    }
+
+    // Second cycle: store more items and flush again (pool reused, no respawn).
+    for i in 10..14 {
+        as_cold(&mut cold)
+            .store(
+                i,
+                &TestCheckpoint {
+                    id: i,
+                    data: alloc::format!("cycle2_{i}"),
+                },
+            )
+            .unwrap();
+    }
+    as_cold(&mut cold).flush().unwrap();
+
+    // All items from both cycles present.
+    for i in 0..4 {
+        assert!(
+            cold.storage().contains(i),
+            "missing checkpoint {i} after second flush"
+        );
+    }
+    for i in 10..14 {
+        assert!(
+            cold.storage().contains(i),
+            "missing checkpoint {i} after second flush"
+        );
+    }
+
+    // Third cycle: verify load still works.
+    let loaded: TestCheckpoint = as_cold(&mut cold).load(2).unwrap();
+    assert_eq!(loaded.id, 2);
+    let loaded: TestCheckpoint = as_cold(&mut cold).load(12).unwrap();
+    assert_eq!(loaded.id, 12);
+}
+
+#[test]
 fn test_manager_remove_cold_parallel() {
     let cold = test_parallel_cold(2);
     let mut manager = PebbleManager::<TestCheckpoint, _, _, _>::new(

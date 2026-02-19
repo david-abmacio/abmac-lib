@@ -129,6 +129,12 @@ where
         };
 
         if let Some(pool) = self.pool.as_mut() {
+            // Drain any uncollected batches from a previous run before
+            // dispatching new work. Without this, workers merge uncollected
+            // batches back into their active rings, where items accumulate
+            // until the next collect() — potentially past the ring's
+            // capacity, triggering unnecessary spout overflow.
+            pool.collect(&mut self.storage).unwrap();
             pool.run(&batch);
         }
     }
@@ -176,12 +182,11 @@ where
         // Flush any pending items through the pool.
         self.run_batch();
 
-        // Take the pool, drain worker rings to storage, recreate.
-        if let Some(pool) = self.pool.take() {
-            let mut consumer = pool.into_consumer();
-            consumer.drain(&mut self.storage);
+        // Drain handoff slots directly to storage. The pool stays alive —
+        // no thread teardown/respawn, no ring reallocation.
+        if let Some(pool) = self.pool.as_mut() {
+            pool.collect(&mut self.storage).unwrap();
         }
-        self.pool = Some(Self::create_pool(self.num_workers, self.storage.clone()));
         Ok(())
     }
 

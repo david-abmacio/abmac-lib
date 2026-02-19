@@ -15,7 +15,7 @@ rkyv = ["bytecast/rkyv"]
 
 [dependencies]
 bytecast = { path = "../bytecast", default-features = false, features = ["alloc", "derive"] }
-hashbrown = "0.15"
+hashbrown = "0.16"
 abmac-macros = { path = "../abmac-macros", default-features = false, features = ["pebble"], optional = true }
 spill-ring = { path = "../spill-ring", default-features = false }
 spout = { path = "../spout" }

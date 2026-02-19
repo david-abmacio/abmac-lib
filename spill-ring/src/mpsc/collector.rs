@@ -120,6 +120,11 @@ impl<T, S: Spout<T>> SequencedCollector<T, S> {
     pub fn into_sequencer(self) -> spout::SequencedSpout<T, S> {
         self.sequencer
     }
+
+    /// Consume and return the inner spout, discarding the sequencer.
+    pub fn into_inner_spout(self) -> S {
+        self.sequencer.into_inner()
+    }
 }
 
 impl<T, S: Spout<T>> Collector<T> for SequencedCollector<T, S> {

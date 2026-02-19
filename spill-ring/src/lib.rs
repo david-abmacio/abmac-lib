@@ -21,8 +21,8 @@ pub use error::PushError;
 pub use iter::{SpillRingIter, SpillRingIterMut};
 #[cfg(feature = "std")]
 pub use mpsc::{
-    Collector, FanInSpout, MergerHandle, PoolBuilder, SequencedCollector, UnorderedCollector,
-    WorkerPanic, WorkerPool,
+    Collector, FanInSpout, MergerHandle, PoolBuilder, SequencedCollector, StreamingFanIn,
+    StreamingMergers, UnorderedCollector, WorkerPanic, WorkerPool,
 };
 #[cfg(feature = "alloc")]
 pub use mpsc::{Consumer, MpscRing, Producer};

@@ -77,6 +77,8 @@ mod merger;
 #[cfg(feature = "std")]
 mod pool;
 #[cfg(feature = "std")]
+mod streaming;
+#[cfg(feature = "std")]
 mod sync;
 
 #[cfg(feature = "std")]
@@ -89,6 +91,8 @@ pub use merger::MergerHandle;
 #[cfg(feature = "std")]
 pub use pool::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use producer::Producer;
+#[cfg(feature = "std")]
+pub use streaming::{StreamingFanIn, StreamingMergers};
 
 use alloc::vec::Vec;
 use spout::{DropSpout, Spout};

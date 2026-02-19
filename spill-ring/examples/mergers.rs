@@ -26,7 +26,7 @@ fn main() {
     // Merger 0 drains workers {0, 2, 4, 6}, merger 1 drains {1, 3, 5, 7}.
     let totals = pool.with_mergers(
         NUM_MERGERS,
-        || UnorderedCollector::new(CollectSpout::new()),
+        |_| UnorderedCollector::new(CollectSpout::new()),
         |mergers| {
             thread::scope(|s| {
                 let handles: Vec<_> = mergers

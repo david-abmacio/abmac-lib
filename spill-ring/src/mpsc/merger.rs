@@ -70,6 +70,12 @@ where
     pub fn collector_mut(&mut self) -> &mut C {
         self.fan_in.collector_mut()
     }
+
+    /// Consume and return the collector.
+    #[inline]
+    pub fn into_collector(self) -> C {
+        self.fan_in.into_collector()
+    }
 }
 
 // SAFETY: MergerHandle is Send when FanInSpout is Send (which requires

@@ -64,7 +64,7 @@ where
     /// Create a new manifest draining to the given spout.
     pub(crate) fn new(spout: S) -> Self {
         Self {
-            ring: SpillRing::with_sink(spout),
+            ring: SpillRing::builder().spout(spout).build(),
             seq: 0,
         }
     }
@@ -137,11 +137,11 @@ where
 
     /// Borrow the underlying spout.
     pub fn spout(&self) -> &S {
-        self.ring.sink_ref()
+        self.ring.spout()
     }
 
     /// Mutably borrow the underlying spout.
     pub fn spout_mut(&mut self) -> &mut S {
-        self.ring.sink_mut()
+        self.ring.spout_mut()
     }
 }

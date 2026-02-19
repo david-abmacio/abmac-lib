@@ -113,7 +113,7 @@ where
     }
 
     fn create_pool(num_workers: usize, storage: S) -> IoPool<CId, N, S> {
-        MpscRing::<(CId, Vec<u8>), N, S>::pool_with_sink(num_workers, storage)
+        MpscRing::<(CId, Vec<u8>), N, S>::pool_with_spout(num_workers, storage)
             .spawn(io_work::<CId, N, S>)
     }
 

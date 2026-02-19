@@ -48,18 +48,18 @@ where
     /// Create a new ring-buffered cold tier.
     pub fn new(storage: S) -> Self {
         Self {
-            ring: SpillRing::with_sink(storage),
+            ring: SpillRing::builder().spout(storage).build(),
         }
     }
 
     /// Borrow the underlying storage (through the ring's spout).
     pub fn storage(&self) -> &S {
-        self.ring.sink_ref()
+        self.ring.spout()
     }
 
     /// Mutably borrow the underlying storage.
     pub fn storage_mut(&mut self) -> &mut S {
-        self.ring.sink_mut()
+        self.ring.spout_mut()
     }
 }
 
@@ -81,24 +81,24 @@ where
     }
 
     fn load(&self, id: T::Id) -> Result<T, Self::Error> {
-        let bytes = self.ring.sink_ref().load(id)?;
+        let bytes = self.ring.spout().load(id)?;
         ByteSerializer
             .deserialize(&bytes)
             .map_err(|source| DirectStorageError::Serializer { source })
     }
 
     fn contains(&self, id: T::Id) -> bool {
-        self.ring.sink_ref().contains(id)
+        self.ring.spout().contains(id)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         let _ = self.ring.flush();
-        let _ = self.ring.sink_mut().flush();
+        let _ = self.ring.spout_mut().flush();
         Ok(())
     }
 
     fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error> {
-        Ok(self.ring.sink_mut().remove(id))
+        Ok(self.ring.spout_mut().remove(id))
     }
 
     fn buffered_count(&self) -> usize {
@@ -125,12 +125,12 @@ where
 
     fn iter_metadata(&self) -> Self::MetadataIter<'_> {
         RingMetadataIter {
-            inner: self.ring.sink_ref().iter_metadata(),
+            inner: self.ring.spout().iter_metadata(),
         }
     }
 
     fn get_metadata(&self, id: T::Id) -> Option<CheckpointMetadata<T::Id, SId, MAX_DEPS>> {
-        self.ring.sink_ref().get_metadata(id)
+        self.ring.spout().get_metadata(id)
     }
 }
 

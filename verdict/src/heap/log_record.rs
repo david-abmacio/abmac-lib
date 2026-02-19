@@ -14,6 +14,7 @@ use crate::{Actionable, Frame, Status};
 
 /// A serializable snapshot of a context frame.
 #[derive(Debug, Clone)]
+#[allow(clippy::unsafe_derive_deserialize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "facet", derive(facet::Facet))]
 #[cfg_attr(
@@ -33,6 +34,7 @@ pub struct FrameRecord {
 
 /// A serializable snapshot of a contextualized error for structured logging.
 #[derive(Debug, Clone)]
+#[allow(clippy::unsafe_derive_deserialize)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "facet", derive(facet::Facet))]
 #[cfg_attr(

@@ -12,7 +12,7 @@
 //!
 //! # Features
 //!
-//! - `std` (default): Full functionality including std::error::Error
+//! - `std` (default): Full functionality including `std::error::Error`
 //! - `alloc`: Heap-allocated context frames, VecDeque-based storage
 //! - (none): Core types only, fully `no_std`
 //!

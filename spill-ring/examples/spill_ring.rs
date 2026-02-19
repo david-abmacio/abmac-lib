@@ -11,12 +11,12 @@ use spout::CollectSpout;
 
 fn main() {
     // A 4-slot ring that collects evicted items into a Vec.
-    let sink = CollectSpout::<u64>::new();
-    let mut ring = SpillRing::<u64, 4>::builder().sink(sink).build();
+    let spout = CollectSpout::<u64>::new();
+    let mut ring = SpillRing::<u64, 4>::builder().spout(spout).build();
 
     // Push 8 items — the first 4 will be evicted to the spout.
     for i in 0..8 {
-        ring.push_mut(i);
+        ring.push(i);
     }
 
     println!("Ring contents (newest 4):");
@@ -26,15 +26,16 @@ fn main() {
     println!();
 
     println!("Evicted to spout (oldest 4):");
-    for val in ring.sink().items() {
+    for val in ring.spout().items() {
         print!("  {val}");
     }
     println!();
 
     // Flush remaining items to spout and drain everything.
-    ring.flush();
+    // clear() flushes to spout without returning the count.
+    ring.clear();
     println!(
         "After flush, spout has {} items total",
-        ring.sink().items().len()
+        ring.spout().items().len()
     );
 }

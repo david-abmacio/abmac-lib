@@ -1,6 +1,9 @@
 #[cfg(feature = "alloc")]
 mod alloc;
 
+#[cfg(feature = "std")]
+mod std_collections;
+
 #[cfg(feature = "serde")]
 mod serde;
 
@@ -371,38 +374,126 @@ fn test_result_max_size() {
     assert_eq!(<core::result::Result<u8, u64>>::MAX_SIZE, Some(9));
 }
 
-// ViewBytes tests
+// Range tests
 #[test]
-fn test_view_bytes_slice() {
-    let data = [1u8, 2, 3, 4, 5];
-    let view: &[u8] = ViewBytes::view(&data).unwrap();
-    assert_eq!(view, &[1, 2, 3, 4, 5]);
+fn test_range_roundtrip() {
+    let mut buf = [0u8; 8];
+    let value: core::ops::Range<u32> = 10..42;
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = <core::ops::Range<u32>>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
 }
 
 #[test]
-fn test_view_bytes_str() {
-    let data = b"hello";
-    let view: &str = ViewBytes::view(data).unwrap();
-    assert_eq!(view, "hello");
+fn test_range_max_size() {
+    assert_eq!(<core::ops::Range<u32>>::MAX_SIZE, Some(8));
+    assert_eq!(<core::ops::Range<u8>>::MAX_SIZE, Some(2));
 }
 
 #[test]
-fn test_view_bytes_str_invalid_utf8() {
-    let data = [0xff, 0xfe]; // invalid UTF-8
-    let result: core::result::Result<&str, _> = ViewBytes::view(&data);
+fn test_range_inclusive_roundtrip() {
+    let mut buf = [0u8; 8];
+    let value: core::ops::RangeInclusive<u32> = 10..=42;
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = <core::ops::RangeInclusive<u32>>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
+}
+
+#[test]
+fn test_range_inclusive_max_size() {
+    assert_eq!(<core::ops::RangeInclusive<u32>>::MAX_SIZE, Some(8));
+}
+
+// NonZero tests
+#[test]
+fn test_nonzero_u32_roundtrip() {
+    use core::num::NonZeroU32;
+    let mut buf = [0u8; 4];
+    let value = NonZeroU32::new(42).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 4);
+    let (decoded, consumed) = NonZeroU32::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 4);
+}
+
+#[test]
+fn test_nonzero_u32_rejects_zero() {
+    use core::num::NonZeroU32;
+    let buf = [0u8; 4];
+    let result = NonZeroU32::from_bytes(&buf);
     assert!(matches!(result, Err(BytesError::InvalidData { .. })));
 }
 
 #[test]
-fn test_view_bytes_array() {
-    let data = [1u8, 2, 3, 4, 5, 6, 7, 8];
-    let view: &[u8; 4] = ViewBytes::view(&data).unwrap();
-    assert_eq!(view, &[1, 2, 3, 4]);
+fn test_nonzero_i64_roundtrip() {
+    use core::num::NonZeroI64;
+    let mut buf = [0u8; 8];
+    let value = NonZeroI64::new(-99).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 8);
+    let (decoded, consumed) = NonZeroI64::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 8);
 }
 
 #[test]
-fn test_view_bytes_array_too_short() {
-    let data = [1u8, 2];
-    let result: core::result::Result<&[u8; 4], _> = ViewBytes::view(&data);
-    assert!(matches!(result, Err(BytesError::UnexpectedEof { .. })));
+fn test_nonzero_u8_max_size() {
+    use core::num::NonZeroU8;
+    assert_eq!(NonZeroU8::MAX_SIZE, Some(1));
+}
+
+#[test]
+fn test_nonzero_u128_roundtrip() {
+    use core::num::NonZeroU128;
+    let mut buf = [0u8; 16];
+    let value = NonZeroU128::new(1).unwrap();
+    let written = value.to_bytes(&mut buf).unwrap();
+    assert_eq!(written, 16);
+    let (decoded, consumed) = NonZeroU128::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, value);
+    assert_eq!(consumed, 16);
+}
+
+// Little-endian wire format tests
+#[test]
+fn test_u16_le_layout() {
+    let mut buf = [0u8; 2];
+    0x0102u16.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x02, 0x01]);
+}
+
+#[test]
+fn test_u64_le_layout() {
+    let mut buf = [0u8; 8];
+    0x0102030405060708u64.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+}
+
+#[test]
+fn test_i16_negative_le_layout() {
+    let mut buf = [0u8; 2];
+    (-1i16).to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0xFF, 0xFF]);
+
+    (-256i16).to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x00, 0xFF]);
+}
+
+#[test]
+fn test_f32_le_layout() {
+    let mut buf = [0u8; 4];
+    core::f32::consts::PI.to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, core::f32::consts::PI.to_le_bytes());
+}
+
+#[test]
+fn test_array_u16_le_layout() {
+    let mut buf = [0u8; 4];
+    [0x0102u16, 0x0304u16].to_bytes(&mut buf).unwrap();
+    assert_eq!(buf, [0x02, 0x01, 0x04, 0x03]);
 }

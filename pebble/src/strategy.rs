@@ -107,24 +107,20 @@ impl TreeStrategy {
         let mut candidates = dag.get_eviction_candidates(active_nodes);
 
         if self.leaf_first {
-            // For trees, prioritize leaf nodes (fewest dependents)
             candidates.sort_by_key(|node_id| {
-                let node = dag.get_node(*node_id);
-                match node {
-                    Some(n) => (n.dependents.len(), n.access_frequency, n.creation_time),
-                    None => (usize::MAX, 0, 0),
-                }
+                let Some(n) = dag.get_node(*node_id) else {
+                    return (usize::MAX, 0u64, 0u64);
+                };
+                (n.dependents.len(), n.access_frequency, n.creation_time)
             });
         } else if self.postorder_priority {
-            // Use critical paths for postorder eviction
             let critical_paths = dag.critical_paths_ref();
             candidates.sort_by_key(|node_id| {
-                let node = dag.get_node(*node_id);
-                let critical_path = critical_paths.get(node_id).unwrap_or(&usize::MAX);
-                match node {
-                    Some(n) => (*critical_path, n.access_frequency, n.computation_cost),
-                    None => (usize::MAX, u64::MAX, usize::MAX),
-                }
+                let cp = critical_paths.get(node_id).copied().unwrap_or(usize::MAX);
+                let Some(n) = dag.get_node(*node_id) else {
+                    return (cp, u64::MAX, usize::MAX);
+                };
+                (cp, n.access_frequency, n.computation_cost)
             });
         }
 
@@ -153,24 +149,19 @@ pub enum DAGPriorityMode {
 #[derive(Debug, Clone)]
 pub struct DAGStrategy {
     pub priority_mode: DAGPriorityMode,
-    pub batch_processing: bool,
 }
 
 impl Default for DAGStrategy {
     fn default() -> Self {
         Self {
             priority_mode: DAGPriorityMode::Hybrid,
-            batch_processing: true,
         }
     }
 }
 
 impl DAGStrategy {
     pub fn new(priority_mode: DAGPriorityMode) -> Self {
-        Self {
-            priority_mode,
-            batch_processing: true,
-        }
+        Self { priority_mode }
     }
 
     pub fn select_eviction_candidates<T, V>(
@@ -187,40 +178,27 @@ impl DAGStrategy {
         let mut candidates = dag.get_eviction_candidates(active_nodes);
 
         // Sort based on priority mode — all modes use critical path as primary key.
-        // LowestComputationCost and Hybrid share the same scoring:
-        // (critical_path, computation_cost, access_frequency).
-        match self.priority_mode {
-            DAGPriorityMode::LeastRecentlyUsed => {
-                candidates.sort_by_key(|node_id| {
-                    let node = dag.get_node(*node_id);
-                    let critical_path = critical_paths.get(node_id).unwrap_or(&usize::MAX);
-                    match node {
-                        Some(n) => (*critical_path, n.access_frequency, n.computation_cost),
-                        None => (usize::MAX, u64::MAX, usize::MAX),
-                    }
-                });
-            }
-            DAGPriorityMode::FewestDependents => {
-                candidates.sort_by_key(|node_id| {
-                    let node = dag.get_node(*node_id);
-                    let critical_path = critical_paths.get(node_id).unwrap_or(&usize::MAX);
-                    match node {
-                        Some(n) => (*critical_path, n.dependents.len(), n.access_frequency),
-                        None => (usize::MAX, usize::MAX, u64::MAX),
-                    }
-                });
-            }
-            DAGPriorityMode::LowestComputationCost | DAGPriorityMode::Hybrid => {
-                candidates.sort_by_key(|node_id| {
-                    let node = dag.get_node(*node_id);
-                    let critical_path = critical_paths.get(node_id).unwrap_or(&usize::MAX);
-                    match node {
-                        Some(n) => (*critical_path, n.computation_cost, n.access_frequency),
-                        None => (usize::MAX, usize::MAX, u64::MAX),
-                    }
-                });
-            }
-        }
+        // Secondary/tertiary keys vary by mode.
+        let mode = self.priority_mode;
+        candidates.sort_by_key(|node_id| {
+            let cp = critical_paths.get(node_id).copied().unwrap_or(usize::MAX);
+            let Some(n) = dag.get_node(*node_id) else {
+                return (cp, usize::MAX, usize::MAX);
+            };
+            let (a, b) = match mode {
+                DAGPriorityMode::LeastRecentlyUsed => {
+                    (n.access_frequency as usize, n.computation_cost)
+                }
+                DAGPriorityMode::FewestDependents => {
+                    (n.dependents.len(), n.access_frequency as usize)
+                }
+                DAGPriorityMode::LowestComputationCost => {
+                    (n.computation_cost, n.access_frequency as usize)
+                }
+                DAGPriorityMode::Hybrid => (n.dependents.len(), n.computation_cost),
+            };
+            (cp, a, b)
+        });
 
         candidates.truncate(target_eviction_count);
         candidates

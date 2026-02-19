@@ -6,15 +6,17 @@ use hashbrown::{HashMap, HashSet};
 use crate::dag::ComputationDAG;
 use crate::strategy::Strategy;
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
-use super::error::{PebbleManagerError, Result};
+use super::manifest::{Manifest, ManifestEntry};
 use super::safety::{CapacityGuard, CheckpointRef};
 use super::stats::{PebbleStats, TheoreticalValidation};
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
-
-/// Fraction of hot capacity to evict/promote at a time (1/4).
-pub(super) const EVICTION_BATCH_DIVISOR: usize = 4;
+use crate::errors::manager::{PebbleManagerError, Result};
 
 /// Space bound safety multiplier: hot_capacity <= sqrt(T) * this value.
 pub(super) const SPACE_BOUND_MULTIPLIER: usize = 2;
@@ -31,16 +33,18 @@ pub(super) const DAG_IO_BOUND: f64 = 3.0;
 /// - `T` — Checkpointable type
 /// - `C` — Cold tier (serialization + storage)
 /// - `W` — Warm tier (unserialized eviction buffer)
+/// - `S` — Manifest spout (where WAL entries drain on overflow)
 ///
 /// Not internally synchronized. For concurrent access, wrap in a
 /// `Mutex` or `RwLock`. `PebbleManager` is `Send` when all type
-/// parameters (`T`, `C`, `W`) are `Send`.
+/// parameters (`T`, `C`, `W`, `S`) are `Send`.
 #[must_use]
-pub struct PebbleManager<T, C, W>
+pub struct PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     pub(super) hot_capacity: usize,
     pub(super) red_pebbles: HashMap<T::Id, T>,
@@ -49,28 +53,40 @@ where
     pub(super) strategy: Strategy,
     pub(super) cold: C,
     pub(super) warm: W,
+    pub(super) manifest: Manifest<T::Id, S>,
     pub(super) checkpoints_added: u64,
-    pub(super) io_operations: u64,
+    pub(super) io_reads: u64,
+    pub(super) io_writes: u64,
+    pub(super) warm_hits: u64,
+    pub(super) cold_loads: u64,
+    pub(super) auto_resize: bool,
+    /// Hot-tier items that have never been written to cold storage.
+    /// Cleared when the item reaches cold (via eviction, flush, or dirty flush).
+    pub(super) dirty: HashSet<T::Id>,
+    /// Cold-tier items flagged for removal. Data remains in cold storage
+    /// until `compact()` physically purges it.
+    pub(super) tombstoned: HashSet<T::Id>,
     pub(super) branches: Option<super::branch::BranchTracker<T::Id>>,
     #[cfg(debug_assertions)]
     pub(super) game: crate::game::PebbleGame<T::Id>,
 }
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    /// Create a builder with sensible defaults.
-    ///
-    /// See [`PebbleManagerBuilder`] for details.
-    pub fn builder() -> super::builder::PebbleManagerBuilder {
-        super::builder::PebbleManagerBuilder::new()
-    }
-
     /// Create a new PebbleManager.
-    pub fn new(cold: C, warm: W, strategy: Strategy, hot_capacity: usize) -> Self {
+    pub(crate) fn new(
+        cold: C,
+        warm: W,
+        manifest: Manifest<T::Id, S>,
+        strategy: Strategy,
+        hot_capacity: usize,
+        auto_resize: bool,
+    ) -> Self {
         debug_assert!(hot_capacity >= 1, "hot_capacity must be at least 1");
         let hot_capacity = hot_capacity.max(1);
         Self {
@@ -81,8 +97,15 @@ where
             strategy,
             cold,
             warm,
+            manifest,
             checkpoints_added: 0,
-            io_operations: 0,
+            io_reads: 0,
+            io_writes: 0,
+            warm_hits: 0,
+            cold_loads: 0,
+            auto_resize,
+            dirty: HashSet::new(),
+            tombstoned: HashSet::new(),
             branches: None,
             #[cfg(debug_assertions)]
             game: crate::game::PebbleGame::new(hot_capacity),
@@ -96,9 +119,8 @@ where
     /// so mutating a checkpoint after insertion would silently corrupt any
     /// downstream rebuild that depends on it.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn add(&mut self, checkpoint: T) -> Result<(), T::Id, C::Error> {
+    pub fn add(&mut self, checkpoint: T, dependencies: &[T::Id]) -> Result<(), T::Id, C::Error> {
         let state_id = checkpoint.checkpoint_id();
-        let dependencies = checkpoint.dependencies();
 
         // Add to DAG (validates dependencies exist)
         self.dag.add_node(state_id, dependencies)?;
@@ -107,20 +129,18 @@ where
             self.evict_red_pebbles()?;
         }
 
-        // Add to fast memory
-        self.red_pebbles.insert(state_id, checkpoint);
-        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
-        self.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        self.debug_place_red(state_id);
+        self.register_hot(state_id, checkpoint);
 
         Ok(())
     }
 
     /// Insert a checkpoint using a deferred constructor. Eviction happens before construction.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert<F>(&mut self, constructor: F) -> Result<T::Id, T::Id, C::Error>
+    pub fn insert<F>(
+        &mut self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<T::Id, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
@@ -133,36 +153,37 @@ where
         let checkpoint = constructor();
         let state_id = checkpoint.checkpoint_id();
 
-        // Add to DAG — always use the checkpoint's own dependencies
-        // to keep the DAG consistent with compute_from_dependencies.
-        self.dag.add_node(state_id, checkpoint.dependencies())?;
+        // Add to DAG (validates dependencies exist)
+        self.dag.add_node(state_id, dependencies)?;
 
-        // Add to fast memory
-        self.red_pebbles.insert(state_id, checkpoint);
-        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
-        self.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        self.debug_place_red(state_id);
+        self.register_hot(state_id, checkpoint);
 
         Ok(state_id)
     }
 
     /// Like [`add`](Self::add), but also returns a [`CheckpointRef`] token.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn add_ref(&mut self, checkpoint: T) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
+    pub fn add_ref(
+        &mut self,
+        checkpoint: T,
+        dependencies: &[T::Id],
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
         let state_id = checkpoint.checkpoint_id();
-        self.add(checkpoint)?;
+        self.add(checkpoint, dependencies)?;
         Ok(CheckpointRef::new(state_id))
     }
 
     /// Like [`insert`](Self::insert), but also returns a [`CheckpointRef`] token.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert_ref<F>(&mut self, constructor: F) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
+    pub fn insert_ref<F>(
+        &mut self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
-        let id = self.insert(constructor)?;
+        let id = self.insert(dependencies, constructor)?;
         Ok(CheckpointRef::new(id))
     }
 
@@ -191,11 +212,18 @@ where
     /// exists. The guard borrows the manager mutably, so no other mutation
     /// can invalidate the guarantee before the guard is consumed.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn ensure_capacity(&mut self) -> Result<CapacityGuard<'_, T, C, W>, T::Id, C::Error> {
+    pub fn ensure_capacity(&mut self) -> Result<CapacityGuard<'_, T, C, W, S>, T::Id, C::Error> {
         if self.red_pebbles.len() >= self.hot_capacity {
             self.evict_red_pebbles()?;
         }
         Ok(CapacityGuard::new(self))
+    }
+
+    /// Get the dependency list for a checkpoint. Returns `None` if the checkpoint
+    /// is not in the DAG.
+    #[inline]
+    pub fn dependencies(&self, state_id: T::Id) -> Option<&[T::Id]> {
+        self.dag.get_node(state_id).map(|n| n.dependencies())
     }
 
     /// Get a checkpoint in fast memory. Returns `None` if not in fast memory.
@@ -247,11 +275,7 @@ where
         // Already hot — just touch and return.
         if self.red_pebbles.contains_key(&state_id) {
             self.dag.mark_accessed(state_id);
-            return self.red_pebbles.get(&state_id).ok_or_else(|| {
-                PebbleManagerError::InternalInconsistency {
-                    detail: alloc::format!("load: lost {:?} after contains_key", state_id),
-                }
-            });
+            return self.expect_hot(state_id);
         }
 
         // Warm tier: promote from warm cache (no deserialization).
@@ -261,15 +285,12 @@ where
             }
             self.red_pebbles.insert(state_id, checkpoint);
             self.dag.mark_accessed(state_id);
+            self.warm_hits = self.warm_hits.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.debug_place_red(state_id);
 
-            return self.red_pebbles.get(&state_id).ok_or_else(|| {
-                PebbleManagerError::InternalInconsistency {
-                    detail: alloc::format!("load: lost {:?} after warm insert", state_id),
-                }
-            });
+            return self.expect_hot(state_id);
         }
 
         // Cold tier: load from storage.
@@ -277,7 +298,6 @@ where
             return Err(PebbleManagerError::NeverAdded { state_id });
         }
 
-        // Flush buffered writes so the item is loadable from storage.
         self.cold
             .flush()
             .map_err(|e| PebbleManagerError::FlushFailed { source: e })?;
@@ -296,7 +316,8 @@ where
 
         self.red_pebbles.insert(state_id, checkpoint);
         self.blue_pebbles.remove(&state_id);
-        self.io_operations = self.io_operations.saturating_add(1);
+        self.io_reads = self.io_reads.saturating_add(1);
+        self.cold_loads = self.cold_loads.saturating_add(1);
         self.dag.mark_accessed(state_id);
 
         #[cfg(debug_assertions)]
@@ -305,11 +326,54 @@ where
             self.debug_validate();
         }
 
+        self.expect_hot(state_id)
+    }
+
+    /// Get a reference to a checkpoint that must be in red_pebbles.
+    fn expect_hot(&self, state_id: T::Id) -> Result<&T, T::Id, C::Error> {
         self.red_pebbles
             .get(&state_id)
             .ok_or_else(|| PebbleManagerError::InternalInconsistency {
-                detail: alloc::format!("load: lost {:?} after cold insert", state_id),
+                detail: alloc::format!("load: {:?} not in red_pebbles after insert", state_id),
             })
+    }
+
+    /// Resize the hot tier capacity at runtime.
+    ///
+    /// If `new_capacity` is smaller than the current red pebble count,
+    /// excess checkpoints are evicted using the active strategy.
+    /// Clamped to a minimum of 1.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn resize_hot(&mut self, new_capacity: usize) -> Result<(), T::Id, C::Error> {
+        let new_capacity = new_capacity.max(1);
+        self.hot_capacity = new_capacity;
+
+        #[cfg(debug_assertions)]
+        {
+            self.game = crate::game::PebbleGame::new(new_capacity);
+            for &id in self.red_pebbles.keys() {
+                self.game.place_red(id);
+            }
+            for &id in &self.blue_pebbles {
+                self.game.place_blue(id);
+            }
+        }
+
+        while self.red_pebbles.len() > self.hot_capacity {
+            self.evict_red_pebbles()?;
+        }
+
+        Ok(())
+    }
+
+    /// Resize the hot tier to the theoretically optimal sqrt(T).
+    ///
+    /// Computes `sqrt(total_checkpoints)` and calls [`resize_hot`](Self::resize_hot).
+    /// Useful for long-running systems where T grows over time.
+    #[must_use = "this returns a Result that may indicate an error"]
+    pub fn resize_optimal(&mut self) -> Result<(), T::Id, C::Error> {
+        let total = self.len();
+        self.resize_hot(total.isqrt().max(1))
     }
 
     /// Force eviction of older checkpoints to storage. Returns count evicted.
@@ -344,11 +408,23 @@ where
         let warm_count = self.warm.len();
         let total_nodes = self.red_pebbles.len() + self.blue_pebbles.len() + warm_count;
 
-        let theoretical_min_io = if self.hot_capacity > 0 {
-            total_nodes.div_ceil(self.hot_capacity).max(1) as u64
-        } else {
-            total_nodes as u64
-        };
+        // I/O lower bound: max of three valid bounds.
+        let dag_stats = self.dag.stats();
+        let s = self.hot_capacity;
+
+        // Counting bound: every node beyond S must be evicted once.
+        let counting = total_nodes.saturating_sub(s);
+
+        // Edge bound (Hong & Kung 1981): (|E| - |V|*S) / S.
+        let v = dag_stats.total_nodes;
+        let e = dag_stats.edge_count;
+        let vs = v.saturating_mul(s);
+        let edge = if e > vs { (e - vs).div_ceil(s) } else { 0 };
+
+        // Depth bound: critical path exceeding hot capacity.
+        let depth = (dag_stats.max_depth + 1).saturating_sub(s);
+
+        let theoretical_min_io = counting.max(edge).max(depth).max(1) as u64;
 
         // Optimal fast memory is O(sqrt(T))
         let optimal_hot = total_nodes.isqrt();
@@ -358,13 +434,18 @@ where
             1.0
         };
 
+        let io_total = self.io_reads + self.io_writes;
+
         PebbleStats::new(
             self.checkpoints_added,
             self.red_pebbles.len(),
             self.blue_pebbles.len(),
             warm_count,
             self.cold.buffered_count(),
-            self.io_operations,
+            self.io_reads,
+            self.io_writes,
+            self.warm_hits,
+            self.cold_loads,
             if self.hot_capacity > 0 {
                 self.red_pebbles.len() as f64 / self.hot_capacity as f64
             } else {
@@ -372,7 +453,7 @@ where
             },
             theoretical_min_io,
             if theoretical_min_io > 0 {
-                self.io_operations as f64 / theoretical_min_io as f64
+                io_total as f64 / theoretical_min_io as f64
             } else {
                 1.0
             },
@@ -407,31 +488,68 @@ where
     pub fn flush(&mut self) -> Result<(), T::Id, C::Error> {
         // Drain warm tier to cold. Collect first so a mid-iteration
         // failure doesn't lose items that haven't been stored yet.
+        // Sort by DAG creation_time so parents are stored before children
+        // (recovery validates dependency ordering by storage timestamp).
         let mut pending: Vec<(T::Id, T)> = self.warm.drain().collect();
+        pending.sort_by_key(|(id, _)| self.dag.get_node(*id).map_or(0, |n| n.creation_time()));
         for i in 0..pending.len() {
             let (id, ref checkpoint) = pending[i];
-            if let Err(e) = self.cold.store(id, checkpoint) {
+
+            if let Err(e) = self.persist_to_cold(id, checkpoint) {
                 // Re-insert the remaining (unstored) items back into warm.
                 // Safe: warm was fully drained above, so re-inserting the
                 // remaining items cannot exceed its capacity.
                 for (remaining_id, remaining) in pending.drain(i..) {
                     self.warm.insert(remaining_id, remaining);
                 }
+                return Err(e);
+            }
+            self.blue_pebbles.insert(id);
+            self.dirty.remove(&id);
+
+            #[cfg(debug_assertions)]
+            self.game.place_blue(id);
+        }
+
+        // Persist dirty hot-tier items to cold storage. Items stay in
+        // red_pebbles for fast access but are now also in cold for
+        // durability. We don't add to blue_pebbles to avoid double-counting
+        // in stats — recovery uses iter_metadata(), not blue_pebbles.
+        //
+        // Sort by DAG creation_time so parents are stored before children.
+        // Recovery sorts by storage timestamp and validates that
+        // dependencies exist, so misordered stores cause integrity errors.
+        let mut dirty_ids: Vec<T::Id> = self.dirty.drain().collect();
+        dirty_ids.sort_by_key(|id| self.dag.get_node(*id).map_or(0, |n| n.creation_time()));
+        for id in dirty_ids {
+            // Cannot use persist_to_cold here: red_pebbles borrow would
+            // conflict with &mut self. Manifest + store are called inline.
+            let Some(checkpoint) = self.red_pebbles.get(&id) else {
+                continue;
+            };
+            let deps = self
+                .dag
+                .get_node(id)
+                .map(|n| n.dependencies())
+                .unwrap_or(&[]);
+            self.manifest.record(id, deps)?;
+            if let Err(e) = self.cold.store(id, checkpoint, deps) {
+                // Compensating tombstone for the write-ahead manifest entry.
+                self.manifest.record_tombstone(id);
                 return Err(PebbleManagerError::Serialization {
                     state_id: id,
                     source: e,
                 });
             }
-            self.blue_pebbles.insert(id);
-            self.io_operations = self.io_operations.saturating_add(1);
-
-            #[cfg(debug_assertions)]
-            self.game.place_blue(id);
+            self.io_writes = self.io_writes.saturating_add(1);
         }
+
         // Flush cold tier buffers to storage
         self.cold
             .flush()
             .map_err(|e| PebbleManagerError::FlushFailed { source: e })?;
+        // Flush manifest entries to spout
+        self.manifest.flush();
         Ok(())
     }
 
@@ -480,7 +598,18 @@ where
         &mut self.cold
     }
 
+    /// Borrow the manifest.
+    #[inline]
+    pub fn manifest(&self) -> &Manifest<T::Id, S> {
+        &self.manifest
+    }
+
     /// Remove a checkpoint. Returns `true` if found and removed.
+    ///
+    /// Flags the checkpoint with a tombstone in the WAL. The data
+    /// remains in cold storage until `compact()` physically purges it.
+    /// Hot and warm tier data is dropped immediately (unserialized,
+    /// not persisted).
     pub fn remove(&mut self, state_id: T::Id) -> bool {
         // Remove from whichever tier holds it (hot, warm, or cold).
         let was_in_hot = self.red_pebbles.remove(&state_id).is_some();
@@ -491,9 +620,17 @@ where
             return false;
         }
 
+        self.dirty.remove(&state_id);
         self.dag.remove_node(state_id);
         if let Some(ref mut tracker) = self.branches {
             tracker.remove_checkpoint(state_id);
+        }
+
+        // Record tombstone for cold-tier items. The data stays in cold
+        // storage until compact() physically purges it.
+        if was_in_cold {
+            self.manifest.record_tombstone(state_id);
+            self.tombstoned.insert(state_id);
         }
 
         // The game tracks hot and cold tiers (not warm).
@@ -506,7 +643,137 @@ where
         true
     }
 
+    /// Compact the manifest. Physically purges cold storage data for
+    /// tombstoned checkpoints and cascades to orphaned descendants
+    /// whose parents have all been removed or purged.
+    ///
+    /// Returns the number of checkpoints purged from cold storage.
+    pub fn compact(&mut self) -> usize {
+        let mut purged = 0usize;
+
+        // Phase 1: purge tombstoned items from cold storage.
+        let tombstoned: Vec<T::Id> = self.tombstoned.drain().collect();
+        for id in &tombstoned {
+            // Best-effort: the tombstone is already in the manifest, so
+            // recovery will skip this ID even if the physical remove fails.
+            // Stale data may linger in cold storage but won't corrupt state.
+            let _ = self.cold.remove(*id);
+            purged += 1;
+        }
+
+        // Phase 2: cascade — find and purge orphaned descendants.
+        // An orphan is a DAG root with computation_cost > 0, meaning
+        // it was originally added with dependencies but all parents
+        // have since been removed. Original roots have cost == 0.
+        let mut worklist: Vec<T::Id> = self
+            .dag
+            .roots
+            .iter()
+            .filter(|&&id| {
+                self.dag
+                    .get_node(id)
+                    .map(|n| n.computation_cost() > 0)
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect();
+
+        while let Some(id) = worklist.pop() {
+            // Collect dependents before removal.
+            let dependents: Vec<T::Id> = self
+                .dag
+                .get_node(id)
+                .map(|n| n.dependents().to_vec())
+                .unwrap_or_default();
+
+            // Remove from tiers.
+            let was_in_hot = self.red_pebbles.remove(&id).is_some();
+            let was_in_warm = !was_in_hot && self.warm.remove(id).is_some();
+            let was_in_cold = !was_in_hot && !was_in_warm && self.blue_pebbles.remove(&id);
+
+            self.dirty.remove(&id);
+            self.dag.remove_node(id);
+            if let Some(ref mut tracker) = self.branches {
+                tracker.remove_checkpoint(id);
+            }
+
+            // Any tier may have a stale cold copy: load() promotes from
+            // cold to hot (removing blue_pebbles) but leaves the data in
+            // cold storage. A subsequent eviction to warm means cold still
+            // has the old copy. Tombstone and purge unconditionally.
+            if self.cold.contains(id) {
+                self.manifest.record_tombstone(id);
+                // Best-effort: see Phase 1 comment above.
+                let _ = self.cold.remove(id);
+                purged += 1;
+            }
+
+            #[cfg(debug_assertions)]
+            if was_in_hot || was_in_cold {
+                self.game.remove_node(id);
+            }
+
+            // Check if any children are now orphaned.
+            for child_id in dependents {
+                let is_orphan = self
+                    .dag
+                    .get_node(child_id)
+                    .map(|n| n.dependencies().is_empty() && n.computation_cost() > 0)
+                    .unwrap_or(false);
+                if is_orphan {
+                    worklist.push(child_id);
+                }
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        self.debug_validate();
+
+        purged
+    }
+
     // --- Internal ---
+
+    /// Write-ahead record + cold store + I/O counter. Returns the cold
+    /// store error on failure so callers can handle rollback.
+    pub(super) fn persist_to_cold(
+        &mut self,
+        id: T::Id,
+        checkpoint: &T,
+    ) -> Result<(), T::Id, C::Error> {
+        let deps = self
+            .dag
+            .get_node(id)
+            .map(|n| n.dependencies())
+            .unwrap_or(&[]);
+        self.manifest.record(id, deps)?;
+        if let Err(e) = self.cold.store(id, checkpoint, deps) {
+            // Cold store failed after the write-ahead manifest entry.
+            // Append a compensating tombstone so recovery doesn't think
+            // this checkpoint is in cold storage.
+            self.manifest.record_tombstone(id);
+            return Err(PebbleManagerError::Serialization {
+                state_id: id,
+                source: e,
+            });
+        }
+        self.io_writes = self.io_writes.saturating_add(1);
+        Ok(())
+    }
+
+    /// Insert a checkpoint into the hot tier with all bookkeeping:
+    /// red_pebbles, dirty set, counter, branch tracking, debug game, auto-grow.
+    pub(super) fn register_hot(&mut self, state_id: T::Id, checkpoint: T) {
+        self.red_pebbles.insert(state_id, checkpoint);
+        self.dirty.insert(state_id);
+        self.checkpoints_added = self.checkpoints_added.saturating_add(1);
+        self.track_new_checkpoint(state_id);
+
+        #[cfg(debug_assertions)]
+        self.debug_place_red(state_id);
+
+        self.auto_grow();
+    }
 
     /// Assign a checkpoint to the active branch and update branch head.
     pub(super) fn track_new_checkpoint(&mut self, state_id: T::Id) {
@@ -526,78 +793,24 @@ where
         self.debug_validate();
     }
 
-    pub(super) fn evict_red_pebbles(&mut self) -> Result<usize, T::Id, C::Error> {
-        let eviction_count = core::cmp::max(1, self.hot_capacity / EVICTION_BATCH_DIVISOR);
-
-        let candidates =
-            self.strategy
-                .select_eviction_candidates(&self.red_pebbles, &self.dag, eviction_count);
-
-        let mut evicted = 0;
-        for state_id in candidates {
-            if let Some(checkpoint) = self.red_pebbles.remove(&state_id) {
-                self.evict_single(state_id, checkpoint)?;
-                evicted += 1;
-            }
-        }
-
-        if evicted == 0 && !self.red_pebbles.is_empty() {
-            return Err(PebbleManagerError::InternalInconsistency {
-                detail: alloc::format!(
-                    "eviction produced 0 candidates from {} hot items",
-                    self.red_pebbles.len()
-                ),
-            });
-        }
-
-        Ok(evicted)
-    }
-
-    pub(super) fn evict_single(
-        &mut self,
-        state_id: T::Id,
-        checkpoint: T,
-    ) -> Result<(), T::Id, C::Error> {
-        // Remove from the game tracker immediately. The warm tier is not
-        // modelled by the pebble game, so the node is temporarily untracked
-        // until the warm tier overflows and cold-stores it (place_blue below).
-        // This gap is intentional: validate() is only called after the full
-        // eviction completes, at which point counts are consistent.
-        #[cfg(debug_assertions)]
-        self.game.remove_node(state_id);
-
-        if let Some((overflow_id, overflow)) = self.warm.insert(state_id, checkpoint) {
-            #[cfg(debug_assertions)]
-            self.game.place_blue(overflow_id);
-
-            if let Err(e) = self.cold.store(overflow_id, &overflow) {
-                // Cold store failed — undo everything so no data is lost.
-                // Remove state_id from warm and put overflow back in its place.
-                let recovered = self.warm.remove(state_id);
-                self.warm.insert(overflow_id, overflow);
-
-                // Put state_id back into hot (where the caller took it from).
-                if let Some(cp) = recovered {
-                    self.red_pebbles.insert(state_id, cp);
-                }
-
+    /// If auto_resize is enabled and sqrt(T) has grown past hot_capacity, grow it.
+    fn auto_grow(&mut self) {
+        if self.auto_resize {
+            let new_optimal = self.len().isqrt().max(1);
+            if new_optimal > self.hot_capacity {
+                self.hot_capacity = new_optimal;
                 #[cfg(debug_assertions)]
                 {
-                    self.game.remove_node(overflow_id); // undo place_blue
-                    if self.red_pebbles.contains_key(&state_id) {
-                        self.game.place_red(state_id); // restored to hot
+                    self.game = crate::game::PebbleGame::new(self.hot_capacity);
+                    for &id in self.red_pebbles.keys() {
+                        self.game.place_red(id);
+                    }
+                    for &id in &self.blue_pebbles {
+                        self.game.place_blue(id);
                     }
                 }
-
-                return Err(PebbleManagerError::Serialization {
-                    state_id: overflow_id,
-                    source: e,
-                });
             }
-            self.blue_pebbles.insert(overflow_id);
-            self.io_operations = self.io_operations.saturating_add(1);
         }
-        Ok(())
     }
 
     #[cfg(debug_assertions)]
@@ -623,11 +836,12 @@ where
     }
 }
 
-impl<T, C, W> Drop for PebbleManager<T, C, W>
+impl<T, C, W, S> Drop for PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     fn drop(&mut self) {
         let _ = self.flush();

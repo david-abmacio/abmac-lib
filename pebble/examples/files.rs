@@ -5,45 +5,27 @@
 //! items overflow from memory to disk.
 //!
 //! Run with:
-//!   cargo run -p pebble --features cold-buffer,bytecast --example file_tiers
+//!   cargo run -p pebble --features derive --example files
 
-use std::collections::HashMap as StdHashMap;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use bytecast::{DeriveFromBytes, DeriveToBytes};
-use pebble::{CheckpointLoader, Checkpointable, PebbleManagerBuilder};
+use pebble::{Checkpoint, CheckpointLoader, CheckpointRemover, PebbleBuilder, RingCold, WarmCache};
 use spout::Spout;
 
-#[derive(Clone, Debug, DeriveToBytes, DeriveFromBytes)]
+#[derive(Clone, Debug, Checkpoint)]
 struct Snapshot {
+    #[checkpoint(id)]
     id: u64,
     payload: Vec<u8>,
-}
-
-impl Checkpointable for Snapshot {
-    type Id = u64;
-    type RebuildError = ();
-
-    fn checkpoint_id(&self) -> u64 {
-        self.id
-    }
-    fn dependencies(&self) -> &[u64] {
-        &[]
-    }
-    fn compute_from_dependencies(
-        base: Self,
-        _deps: &hashbrown::HashMap<u64, &Self>,
-    ) -> Result<Self, ()> {
-        Ok(base)
-    }
 }
 
 /// Stores each checkpoint as a separate file: `<dir>/<id>.bin`.
 struct FileStorage {
     dir: PathBuf,
     /// Track which IDs we've written (avoids scanning the filesystem).
-    written: StdHashMap<u64, ()>,
+    written: HashMap<u64, ()>,
 }
 
 impl FileStorage {
@@ -51,7 +33,7 @@ impl FileStorage {
         fs::create_dir_all(dir).expect("create storage dir");
         Self {
             dir: dir.to_path_buf(),
-            written: StdHashMap::new(),
+            written: HashMap::new(),
         }
     }
 
@@ -60,10 +42,10 @@ impl FileStorage {
     }
 }
 
-impl Spout<(u64, Vec<u8>)> for FileStorage {
+impl Spout<(u64, Vec<u8>, Vec<u64>)> for FileStorage {
     type Error = core::convert::Infallible;
 
-    fn send(&mut self, (id, bytes): (u64, Vec<u8>)) -> Result<(), Self::Error> {
+    fn send(&mut self, (id, bytes, _deps): (u64, Vec<u8>, Vec<u64>)) -> Result<(), Self::Error> {
         let path = self.path_for(id);
         fs::write(&path, &bytes).expect("write checkpoint file");
         self.written.insert(id, ());
@@ -83,6 +65,16 @@ impl CheckpointLoader<u64> for FileStorage {
     }
 }
 
+impl CheckpointRemover<u64> for FileStorage {
+    fn remove(&mut self, id: u64) -> bool {
+        if self.written.remove(&id).is_none() {
+            return false;
+        }
+        let _ = fs::remove_file(self.path_for(id));
+        true
+    }
+}
+
 fn main() {
     // Use a temp directory so we don't litter the repo.
     let dir = std::env::temp_dir().join("pebble_file_tiers_example");
@@ -94,12 +86,13 @@ fn main() {
     {
         println!("Storage directory: {}\n", dir.display());
 
-        let mut manager = PebbleManagerBuilder::new()
-            .storage(FileStorage::new(&dir))
+        let cold = RingCold::<u64, _, 64>::new(FileStorage::new(&dir));
+        let mut manager = PebbleBuilder::new()
+            .cold(cold)
+            .warm(WarmCache::<Snapshot>::with_capacity(4))
+            .log(spout::DropSpout)
             .hot_capacity(4)
-            .warm_capacity(4)
-            .build::<Snapshot>()
-            .unwrap();
+            .build::<Snapshot>();
 
         println!("Configuration: hot=4, warm=4\n");
 
@@ -109,7 +102,7 @@ fn main() {
                 id: i,
                 payload: vec![i as u8; 64],
             };
-            manager.add(cp).unwrap();
+            manager.add(cp, &[]).unwrap();
 
             let stats = manager.stats();
             println!(

@@ -66,7 +66,7 @@ impl Spout<Frame> for FrameFormatter {
             self.buffer.push('\n');
         }
         let _ = write!(self.buffer, "  |-> {frame}");
-        self.count += 1;
+        self.count = self.count.saturating_add(1);
         Ok(())
     }
 }
@@ -138,7 +138,7 @@ impl Spout<Frame> for StderrSpout {
     type Error = core::convert::Infallible;
 
     fn send(&mut self, frame: Frame) -> Result<(), Self::Error> {
-        std::eprintln!("[verdict overflow] {}", frame);
+        std::eprintln!("[verdict overflow] {frame}");
         Ok(())
     }
 }

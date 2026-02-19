@@ -1,6 +1,7 @@
 extern crate std;
 
 mod producer_spout;
+mod sequenced;
 
 #[cfg(feature = "std")]
 mod std_spouts;
@@ -10,7 +11,7 @@ mod bytecast_spouts;
 
 use std::{vec, vec::Vec};
 
-use crate::{BatchSpout, CollectSpout, DropSpout, FnSpout, ReduceSpout, Spout, spout};
+use crate::{BatchSpout, CollectSpout, DropSpout, FlushFn, FnSpout, ReduceSpout, Spout, spout};
 
 #[test]
 fn drop_spout_accepts_items() {
@@ -25,7 +26,7 @@ fn drop_spout_accepts_items() {
 fn fn_spout_calls_closure() {
     let mut collected = Vec::new();
     {
-        let mut s = FnSpout(|x: i32| collected.push(x));
+        let mut s = FnSpout::new(|x: i32| collected.push(x));
         let _ = s.send(1);
         let _ = s.send(2);
         let _ = s.send(3);
@@ -69,9 +70,9 @@ fn fn_flush_spout_calls_both_closures() {
         |_: i32| {
             SEND_COUNT.fetch_add(1, Ordering::SeqCst);
         },
-        || {
+        FlushFn(|| {
             FLUSH_COUNT.fetch_add(1, Ordering::SeqCst);
-        },
+        }),
     );
 
     let _ = s.send(1);
@@ -166,6 +167,7 @@ fn reduce_spout_reduces_batches() {
 
 #[test]
 fn reduce_spout_flush_partial() {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     let mut s = ReduceSpout::new(5, |batch: Vec<i32>| batch.len() as i32, CollectSpout::new());
 
     let _ = s.send(1);
@@ -183,7 +185,7 @@ fn reduce_spout_type_transform() {
     // Transform i32 -> String
     let mut s = ReduceSpout::new(
         2,
-        |batch: Vec<i32>| std::format!("{:?}", batch),
+        |batch: Vec<i32>| std::format!("{batch:?}"),
         CollectSpout::<String>::new(),
     );
 

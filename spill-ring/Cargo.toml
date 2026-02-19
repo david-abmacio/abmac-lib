@@ -39,8 +39,28 @@ required-features = ["std"]
 
 [[example]]
 name = "mpsc"
-required-features = ["std"]
+required-features = ["alloc"]
 
 [[example]]
 name = "backpressure"
+required-features = ["std"]
+
+[[example]]
+name = "worker_pool"
+required-features = ["std"]
+
+[[example]]
+name = "fan_in"
+required-features = ["std"]
+
+[[example]]
+name = "sequenced"
+required-features = ["std"]
+
+[[example]]
+name = "mergers"
+required-features = ["std"]
+
+[[example]]
+name = "pipeline"
 required-features = ["std"]

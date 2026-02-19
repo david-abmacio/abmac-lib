@@ -35,11 +35,10 @@ const HOT_CAPACITY: usize = 3;
 //   #3 = 488   depends on #2:  (300 - 56) * 2
 //   #4 = 125   depends on #3:  (488 + 12) / 4
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, bytecast::DeriveToBytes, bytecast::DeriveFromBytes)]
 struct RebuildCheckpoint {
     id: u64,
     value: u64,
-    deps: Vec<u64>,
 }
 
 impl Checkpointable for RebuildCheckpoint {
@@ -50,73 +49,30 @@ impl Checkpointable for RebuildCheckpoint {
         self.id
     }
 
-    fn dependencies(&self) -> &[u64] {
-        &self.deps
-    }
-
     fn compute_from_dependencies(
         base: Self,
         deps: &HashMap<Self::Id, &Self>,
     ) -> core::result::Result<Self, Self::RebuildError> {
-        if base.deps.is_empty() {
+        if deps.is_empty() {
             return Ok(base);
         }
-        let parent = deps.get(&base.deps[0]).ok_or("missing parent dependency")?;
+        // Find the parent — there's exactly one dependency per checkpoint in this pipeline
+        let (_, parent) = deps.iter().next().ok_or("missing parent dependency")?;
         let value = match base.id {
             2 => parent.value * 3,
             3 => (parent.value - 56) * 2,
             4 => (parent.value + 12) / 4,
             _ => return Err("unknown checkpoint"),
         };
-        Ok(RebuildCheckpoint {
-            id: base.id,
-            value,
-            deps: base.deps,
-        })
-    }
-}
-
-struct RebuildSer;
-
-impl CheckpointSerializer<RebuildCheckpoint> for RebuildSer {
-    type Error = &'static str;
-
-    fn serialize(&self, cp: &RebuildCheckpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        let mut b = Vec::with_capacity(32);
-        b.extend_from_slice(&cp.id.to_be_bytes());
-        b.extend_from_slice(&cp.value.to_be_bytes());
-        b.extend_from_slice(&(cp.deps.len() as u64).to_be_bytes());
-        for d in &cp.deps {
-            b.extend_from_slice(&d.to_be_bytes());
-        }
-        Ok(b)
-    }
-
-    fn deserialize(&self, b: &[u8]) -> core::result::Result<RebuildCheckpoint, Self::Error> {
-        if b.len() < 24 {
-            return Err("too small");
-        }
-        let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
-        let val = u64::from_be_bytes(b[8..16].try_into().unwrap());
-        let n = u64::from_be_bytes(b[16..24].try_into().unwrap()) as usize;
-        let mut deps = Vec::with_capacity(n);
-        for i in 0..n {
-            deps.push(u64::from_be_bytes(
-                b[24 + i * 8..32 + i * 8].try_into().unwrap(),
-            ));
-        }
-        Ok(RebuildCheckpoint {
-            id,
-            value: val,
-            deps,
-        })
+        Ok(RebuildCheckpoint { id: base.id, value })
     }
 }
 
 type RebuildMgr = PebbleManager<
     RebuildCheckpoint,
-    DirectStorage<InMemoryStorage<u64, u128, 16>, RebuildSer>,
+    DirectStorage<InMemoryStorage<u64, u128, 16>>,
     NoWarm,
+    spout::DropSpout,
 >;
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -147,8 +103,13 @@ struct Step {
 // Then we load one from cold and rebuild another from the dep chain.
 
 fn main() {
-    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new(), RebuildSer);
-    let mut mgr = RebuildMgr::new(cold, NoWarm, Strategy::default(), HOT_CAPACITY);
+    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new());
+    let mut mgr: RebuildMgr = PebbleBuilder::new()
+        .cold(cold)
+        .warm(NoWarm)
+        .log(spout::DropSpout)
+        .hot_capacity(HOT_CAPACITY)
+        .build::<RebuildCheckpoint>();
     let mut val: u64 = 0;
     let mut step_n: u64 = 0;
     let mut flow: Vec<FlowNode> = Vec::new();
@@ -198,15 +159,14 @@ fn main() {
                 });
             }
             Action::Save { id, dep } => {
-                let deps = match dep {
-                    Some(d) => vec![*d],
-                    None => vec![],
-                };
-                mgr.add(RebuildCheckpoint {
-                    id: *id,
-                    value: val,
-                    deps,
-                })
+                let deps: Vec<u64> = dep.iter().copied().collect();
+                mgr.add(
+                    RebuildCheckpoint {
+                        id: *id,
+                        value: val,
+                    },
+                    &deps,
+                )
                 .unwrap();
                 if let Some(last) = flow.last_mut() {
                     last.cp_id = Some(*id);

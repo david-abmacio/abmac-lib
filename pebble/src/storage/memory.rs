@@ -5,10 +5,13 @@ use core::hash::Hash;
 use hashbrown::HashMap;
 use spout::Spout;
 
-use super::{CheckpointLoader, CheckpointMetadata, RecoverableStorage, SessionId, StorageError};
+use super::{
+    CheckpointLoader, CheckpointMetadata, CheckpointRemover, RecoverableStorage, SessionId,
+    StorageError,
+};
 
 /// In-memory storage for testing. Not thread-safe.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InMemoryStorage<
     CId: Copy + Eq + Hash + Default + core::fmt::Debug = u64,
     SId: SessionId = u128,
@@ -57,23 +60,28 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
     }
 
     pub fn remove(&mut self, state_id: CId) -> bool {
-        // Bitwise OR: both removes must execute (|| would short-circuit).
+        // Both removes execute before combining results.
         let data = self.data.remove(&state_id).is_some();
         let meta = self.metadata.remove(&state_id).is_some();
-        data || meta
+        data | meta
     }
 }
 
 impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
-    Spout<(CId, Vec<u8>)> for InMemoryStorage<CId, SId, MAX_DEPS>
+    Spout<(CId, Vec<u8>, Vec<CId>)> for InMemoryStorage<CId, SId, MAX_DEPS>
 {
     type Error = core::convert::Infallible;
 
-    fn send(&mut self, item: (CId, Vec<u8>)) -> Result<(), Self::Error> {
-        let (state_id, data) = item;
+    fn send(&mut self, item: (CId, Vec<u8>, Vec<CId>)) -> Result<(), Self::Error> {
+        let (state_id, data, deps) = item;
         let ts = self.next_timestamp;
         self.next_timestamp = ts.wrapping_add(1);
-        let metadata = CheckpointMetadata::new(state_id, ts, SId::default());
+        // with_dependencies can only fail if deps.len() > MAX_DEPS.
+        // ColdTier callers are bounded by the same MAX_DEPS, so this
+        // is safe to unwrap. Use expect for a clear message if it
+        // ever fires in a misconfigured setup.
+        let metadata = CheckpointMetadata::with_dependencies(state_id, &deps, ts, SId::default())
+            .expect("dependency count exceeds MAX_DEPS");
         self.store_with_metadata(state_id, data, metadata);
         Ok(())
     }
@@ -91,6 +99,14 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
 
     fn contains(&self, state_id: CId) -> bool {
         self.data.contains_key(&state_id)
+    }
+}
+
+impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const MAX_DEPS: usize>
+    CheckpointRemover<CId> for InMemoryStorage<CId, SId, MAX_DEPS>
+{
+    fn remove(&mut self, state_id: CId) -> bool {
+        self.remove(state_id)
     }
 }
 
@@ -132,43 +148,4 @@ impl<'a, CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, con
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|(&id, meta)| (id, meta.clone()))
     }
-}
-
-/// IEEE 802.3 CRC32 polynomial (reversed bit order).
-const CRC32_POLYNOMIAL: u32 = 0xEDB8_8320;
-const CRC32_INIT: u32 = 0xFFFF_FFFFu32;
-const BITS_PER_BYTE: usize = 8;
-
-const fn crc32_entry(byte: u8) -> u32 {
-    let mut crc = byte as u32;
-    let mut i = 0;
-    while i < BITS_PER_BYTE {
-        crc = if crc & 1 != 0 {
-            (crc >> 1) ^ CRC32_POLYNOMIAL
-        } else {
-            crc >> 1
-        };
-        i += 1;
-    }
-    crc
-}
-
-const CRC32_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
-    let mut i = 0;
-    while i < 256 {
-        table[i] = crc32_entry(i as u8);
-        i += 1;
-    }
-    table
-};
-
-/// CRC32 checksum (IEEE polynomial).
-pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = CRC32_INIT;
-    for &byte in data {
-        let index = ((crc ^ byte as u32) & 0xFF) as usize;
-        crc = (crc >> 8) ^ CRC32_TABLE[index];
-    }
-    !crc
 }

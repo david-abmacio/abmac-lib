@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["bytecast", "bytecast-macros", "spout", "spill-ring", "verdict", "pebble"]
+members = ["abmac-macros", "bytecast", "spout", "spill-ring", "verdict", "pebble"]
 
 [workspace.package]
 edition = "2024"
@@ -11,4 +11,4 @@ repository = "https://github.com/abmac-io/abmac-lib"
 [workspace.dependencies]
 spout = { path = "./spout" }
 bytecast = { path = "./bytecast" }
-bytecast-macros = { path = "./bytecast-macros" }
+abmac-macros = { path = "./abmac-macros" }

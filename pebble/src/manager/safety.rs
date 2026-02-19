@@ -3,11 +3,16 @@
 //! [`CheckpointRef`] proves a checkpoint existed at creation time.
 //! [`CapacityGuard`] proves the hot tier has a free slot.
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
-use super::error::Result;
+use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::Result;
 
 /// Proof that a checkpoint existed in the manager at creation time.
 ///
@@ -47,22 +52,24 @@ impl<Id> CheckpointRef<Id> {
 /// Borrows the manager mutably, so no other mutation can happen between
 /// guard creation and use.
 #[must_use = "guard should be consumed by .store() or .insert()"]
-pub struct CapacityGuard<'a, T, C, W>
+pub struct CapacityGuard<'a, T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    manager: &'a mut PebbleManager<T, C, W>,
+    manager: &'a mut PebbleManager<T, C, W, S>,
 }
 
-impl<'a, T, C, W> CapacityGuard<'a, T, C, W>
+impl<'a, T, C, W, S> CapacityGuard<'a, T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
-    pub(super) fn new(manager: &'a mut PebbleManager<T, C, W>) -> Self {
+    pub(super) fn new(manager: &'a mut PebbleManager<T, C, W, S>) -> Self {
         Self { manager }
     }
 
@@ -70,17 +77,16 @@ where
     ///
     /// Consumes the guard. Returns a [`CheckpointRef`] for the new checkpoint.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn store(self, checkpoint: T) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
+    pub fn store(
+        self,
+        checkpoint: T,
+        dependencies: &[T::Id],
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error> {
         let mgr = self.manager;
         let state_id = checkpoint.checkpoint_id();
 
-        mgr.dag.add_node(state_id, checkpoint.dependencies())?;
-        mgr.red_pebbles.insert(state_id, checkpoint);
-        mgr.checkpoints_added = mgr.checkpoints_added.saturating_add(1);
-        mgr.track_new_checkpoint(state_id);
-
-        #[cfg(debug_assertions)]
-        mgr.debug_place_red(state_id);
+        mgr.dag.add_node(state_id, dependencies)?;
+        mgr.register_hot(state_id, checkpoint);
 
         Ok(CheckpointRef::new(state_id))
     }
@@ -89,10 +95,14 @@ where
     ///
     /// Consumes the guard. Returns a [`CheckpointRef`] for the new checkpoint.
     #[must_use = "this returns a Result that may indicate an error"]
-    pub fn insert<F>(self, constructor: F) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
+    pub fn insert<F>(
+        self,
+        dependencies: &[T::Id],
+        constructor: F,
+    ) -> Result<CheckpointRef<T::Id>, T::Id, C::Error>
     where
         F: FnOnce() -> T,
     {
-        self.store(constructor())
+        self.store(constructor(), dependencies)
     }
 }

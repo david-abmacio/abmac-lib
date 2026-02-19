@@ -14,9 +14,9 @@ fn channel_spout_sends_items() {
     let (tx, rx) = mpsc::channel();
     let mut s = ChannelSpout::new(tx);
 
-    let _ = s.send(1);
-    let _ = s.send(2);
-    let _ = s.send(3);
+    s.send(1).unwrap();
+    s.send(2).unwrap();
+    s.send(3).unwrap();
 
     assert_eq!(rx.recv().unwrap(), 1);
     assert_eq!(rx.recv().unwrap(), 2);
@@ -24,15 +24,14 @@ fn channel_spout_sends_items() {
 }
 
 #[test]
-fn channel_spout_ignores_disconnected_receiver() {
+fn channel_spout_returns_error_on_disconnected_receiver() {
     let (tx, rx) = mpsc::channel::<i32>();
     let mut s = ChannelSpout::new(tx);
 
     drop(rx);
 
-    // Should not panic
-    let _ = s.send(1);
-    let _ = s.send(2);
+    assert!(s.send(1).is_err());
+    assert!(s.send(2).is_err());
 }
 
 #[test]
@@ -61,9 +60,9 @@ fn sync_channel_spout_sends_items() {
     let (tx, rx) = mpsc::sync_channel(4);
     let mut s = SyncChannelSpout::new(tx);
 
-    let _ = s.send(1);
-    let _ = s.send(2);
-    let _ = s.send(3);
+    s.send(1).unwrap();
+    s.send(2).unwrap();
+    s.send(3).unwrap();
 
     assert_eq!(rx.recv().unwrap(), 1);
     assert_eq!(rx.recv().unwrap(), 2);
@@ -75,11 +74,11 @@ fn sync_channel_spout_blocks_when_full() {
     let (tx, rx) = mpsc::sync_channel(2);
     let mut s = SyncChannelSpout::new(tx);
 
-    let _ = s.send(1);
-    let _ = s.send(2);
+    s.send(1).unwrap();
+    s.send(2).unwrap();
     // Channel is now full — send in a thread so we can unblock it
     let handle = thread::spawn(move || {
-        let _ = s.send(3); // blocks until receiver drains
+        s.send(3).unwrap(); // blocks until receiver drains
         s
     });
 
@@ -92,14 +91,13 @@ fn sync_channel_spout_blocks_when_full() {
 }
 
 #[test]
-fn sync_channel_spout_ignores_disconnected_receiver() {
+fn sync_channel_spout_returns_error_on_disconnected_receiver() {
     let (tx, rx) = mpsc::sync_channel::<i32>(4);
     let mut s = SyncChannelSpout::new(tx);
 
     drop(rx);
 
-    // Should not panic
-    let _ = s.send(1);
+    assert!(s.send(1).is_err());
 }
 
 #[test]
@@ -119,9 +117,9 @@ fn arc_mutex_spout_sends_items() {
     let s = Arc::new(Mutex::new(CollectSpout::new()));
     let mut handle = s.clone();
 
-    let _ = handle.send(1);
-    let _ = handle.send(2);
-    let _ = handle.send(3);
+    handle.send(1).unwrap();
+    handle.send(2).unwrap();
+    handle.send(3).unwrap();
 
     assert_eq!(s.lock().unwrap().items(), vec![1, 2, 3]);
 }
@@ -147,7 +145,7 @@ fn arc_mutex_spout_flush_delegates() {
     FLUSH_COUNT.store(0, Ordering::SeqCst);
 
     let mut s = Arc::new(Mutex::new(FlushTracker));
-    let _ = s.flush();
+    s.flush().unwrap();
     assert_eq!(FLUSH_COUNT.load(Ordering::SeqCst), 1);
 }
 
@@ -160,7 +158,7 @@ fn arc_mutex_spout_shared_across_threads() {
             let mut handle = s.clone();
             scope.spawn(move || {
                 for j in 0..10 {
-                    let _ = handle.send(i * 100 + j);
+                    handle.send(i * 100 + j).unwrap();
                 }
             });
         }

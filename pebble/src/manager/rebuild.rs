@@ -3,18 +3,24 @@
 use alloc::vec::Vec;
 use hashbrown::{HashMap, HashSet};
 
+use core::convert::Infallible;
+
+use spout::Spout;
+
 use super::cold::ColdTier;
-use super::error::{PebbleManagerError, Result};
+use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::safety::CheckpointRef;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::{PebbleManagerError, Result};
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
     C: ColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Rebuild a checkpoint from its dependencies.
     ///
@@ -29,11 +35,10 @@ where
     #[must_use = "this returns a Result that may indicate an error"]
     pub fn rebuild(&mut self, state_id: T::Id) -> Result<T, T::Id, C::Error> {
         // Warm tier: promote to red_pebbles before rebuild.
-        if let Some(checkpoint) = self.warm.get(state_id).cloned() {
+        if let Some(checkpoint) = self.warm.remove(state_id) {
             if self.red_pebbles.len() >= self.hot_capacity {
                 self.evict_red_pebbles()?;
             }
-            self.warm.remove(state_id);
             self.red_pebbles.insert(state_id, checkpoint);
 
             #[cfg(debug_assertions)]
@@ -42,10 +47,14 @@ where
 
         if let Some(checkpoint) = self.red_pebbles.get(&state_id).cloned() {
             self.dag.mark_accessed(state_id);
-            if checkpoint.dependencies().is_empty() {
+            let deps = self
+                .dag
+                .get_node(state_id)
+                .map_or(&[][..], |n| n.dependencies());
+            if deps.is_empty() {
                 return Ok(checkpoint);
             }
-            let dep_refs = self.collect_dependency_refs(checkpoint.dependencies(), state_id)?;
+            let dep_refs = self.collect_dependency_refs(deps, state_id)?;
             return Self::compute_from_deps(checkpoint, &dep_refs, state_id);
         }
 
@@ -86,8 +95,12 @@ where
         for node_id in load_order {
             let base_state = self.resolve_base_state(node_id)?;
             let computed = {
-                let dep_refs =
-                    self.collect_mixed_refs(base_state.dependencies(), &workspace, node_id)?;
+                let deps: Vec<T::Id> = self
+                    .dag
+                    .get_node(node_id)
+                    .map(|n| n.dependencies().to_vec())
+                    .unwrap_or_default();
+                let dep_refs = self.collect_mixed_refs(&deps, &workspace, node_id)?;
                 Self::compute_from_deps(base_state, &dep_refs, node_id)?
             };
             workspace.insert(node_id, computed);
@@ -127,7 +140,7 @@ where
             });
         }
 
-        self.io_operations = self.io_operations.saturating_add(1);
+        self.io_reads = self.io_reads.saturating_add(1);
         self.load_from_cold(node_id)
     }
 
@@ -198,7 +211,7 @@ where
         // this or subsequent rebuild steps.
         for dep_id in cold_loads {
             let checkpoint = self.load_from_cold(dep_id)?;
-            self.io_operations = self.io_operations.saturating_add(1);
+            self.io_reads = self.io_reads.saturating_add(1);
             self.red_pebbles.insert(dep_id, checkpoint);
             self.blue_pebbles.remove(&dep_id);
 
@@ -225,7 +238,7 @@ where
     }
 
     pub(super) fn promote_from_workspace(&mut self, mut workspace: HashMap<T::Id, T>) {
-        let promote_budget = self.hot_capacity / super::pebble_manager::EVICTION_BATCH_DIVISOR;
+        let promote_budget = self.hot_capacity / super::eviction::EVICTION_BATCH_DIVISOR;
         let mut promoted = 0;
 
         let mut candidates: Vec<_> = workspace.keys().copied().collect();

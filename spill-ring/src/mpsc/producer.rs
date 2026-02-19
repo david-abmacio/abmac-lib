@@ -56,9 +56,9 @@ impl<T, const N: usize> Producer<T, N, DropSpout> {
 }
 
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Producer<T, N, S> {
-    pub(crate) fn with_sink(sink: S) -> Self {
+    pub(crate) fn with_spout(spout: S) -> Self {
         Self {
-            ring: SpillRing::with_sink(sink),
+            ring: SpillRing::with_spout(spout),
         }
     }
 }

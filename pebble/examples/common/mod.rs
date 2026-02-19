@@ -1,6 +1,7 @@
 //! Shared types and helpers for the animated pebble examples.
 
 use pebble::prelude::*;
+use spout::DropSpout;
 
 // ── ANSI escapes ────────────────────────────────────────────────────────────
 
@@ -49,11 +50,10 @@ macro_rules! row {
 
 // ── Checkpoint type ─────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, bytecast::DeriveToBytes, bytecast::DeriveFromBytes)]
 pub struct Checkpoint {
     pub id: u64,
     pub value: u64,
-    pub deps: Vec<u64>,
 }
 
 impl Checkpointable for Checkpoint {
@@ -64,10 +64,6 @@ impl Checkpointable for Checkpoint {
         self.id
     }
 
-    fn dependencies(&self) -> &[u64] {
-        &self.deps
-    }
-
     fn compute_from_dependencies(
         base: Self,
         _: &HashMap<Self::Id, &Self>,
@@ -76,53 +72,19 @@ impl Checkpointable for Checkpoint {
     }
 }
 
-// ── Serializer ──────────────────────────────────────────────────────────────
-
-pub struct Ser;
-
-impl CheckpointSerializer<Checkpoint> for Ser {
-    type Error = &'static str;
-
-    fn serialize(&self, cp: &Checkpoint) -> core::result::Result<Vec<u8>, Self::Error> {
-        let mut b = Vec::with_capacity(32);
-        b.extend_from_slice(&cp.id.to_be_bytes());
-        b.extend_from_slice(&cp.value.to_be_bytes());
-        b.extend_from_slice(&(cp.deps.len() as u64).to_be_bytes());
-        for d in &cp.deps {
-            b.extend_from_slice(&d.to_be_bytes());
-        }
-        Ok(b)
-    }
-
-    fn deserialize(&self, b: &[u8]) -> core::result::Result<Checkpoint, Self::Error> {
-        if b.len() < 24 {
-            return Err("too small");
-        }
-        let id = u64::from_be_bytes(b[0..8].try_into().unwrap());
-        let val = u64::from_be_bytes(b[8..16].try_into().unwrap());
-        let n = u64::from_be_bytes(b[16..24].try_into().unwrap()) as usize;
-        let mut deps = Vec::with_capacity(n);
-        for i in 0..n {
-            deps.push(u64::from_be_bytes(
-                b[24 + i * 8..32 + i * 8].try_into().unwrap(),
-            ));
-        }
-        Ok(Checkpoint {
-            id,
-            value: val,
-            deps,
-        })
-    }
-}
-
 // ── Manager type alias ──────────────────────────────────────────────────────
 
 pub type Mgr =
-    PebbleManager<Checkpoint, DirectStorage<InMemoryStorage<u64, u128, 16>, Ser>, NoWarm>;
+    PebbleManager<Checkpoint, DirectStorage<InMemoryStorage<u64, u128, 16>>, NoWarm, DropSpout>;
 
 pub fn new_manager(hot_capacity: usize) -> Mgr {
-    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new(), Ser);
-    Mgr::new(cold, NoWarm, Strategy::default(), hot_capacity)
+    let cold = DirectStorage::new(InMemoryStorage::<u64, u128, 16>::new());
+    PebbleBuilder::new()
+        .cold(cold)
+        .warm(NoWarm)
+        .log(DropSpout)
+        .hot_capacity(hot_capacity)
+        .build::<Checkpoint>()
 }
 
 // ── Step panel ──────────────────────────────────────────────────────────────

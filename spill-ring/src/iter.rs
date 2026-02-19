@@ -1,9 +1,13 @@
-//! Iterators for SpillRing.
+//! Iterators for `SpillRing`.
 
 use crate::ring::SpillRing;
 use spout::Spout;
 
 /// Immutable iterator.
+///
+/// Holds `&'a mut SpillRing` to prevent `push(&self)` from invalidating
+/// yielded references. The mutable borrow is purely for exclusivity —
+/// the iterator only reads slot contents.
 pub struct SpillRingIter<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> {
     ring: &'a SpillRing<T, N, S>,
     pos: usize,
@@ -14,12 +18,14 @@ pub struct SpillRingIter<'a, T, const N: usize, S: Spout<T, Error = core::conver
 impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
     SpillRingIter<'a, T, N, S>
 {
-    pub(crate) fn new(ring: &'a SpillRing<T, N, S>) -> Self {
+    pub(crate) fn new(ring: &'a mut SpillRing<T, N, S>) -> Self {
+        let len = ring.len();
+        let head = ring.head.load();
         Self {
             ring,
             pos: 0,
-            len: ring.len(),
-            head: ring.head.load(),
+            len,
+            head,
         }
     }
 }
@@ -36,6 +42,9 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Iter
         }
         let idx = self.head.wrapping_add(self.pos) & (N - 1);
         self.pos += 1;
+        // SAFETY: The &mut self borrow in new() prevents push(&self) from
+        // invalidating slot contents. Slot at idx is initialized
+        // (pos < len, where len = tail - head at construction).
         Some(unsafe {
             let slot = &self.ring.buffer[idx];
             (*slot.data.get()).assume_init_ref()
@@ -69,11 +78,15 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> core::it
 }
 
 /// Mutable iterator.
+///
+/// Stores a raw pointer to avoid creating `&mut T` through a shared reference.
+/// The lifetime `'a` is enforced via `PhantomData`.
 pub struct SpillRingIterMut<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> {
-    ring: &'a SpillRing<T, N, S>,
+    ring: *mut SpillRing<T, N, S>,
     pos: usize,
     len: usize,
     head: usize,
+    _marker: core::marker::PhantomData<&'a mut SpillRing<T, N, S>>,
 }
 
 impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
@@ -83,10 +96,11 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>
         let len = ring.len();
         let head = ring.head.load();
         Self {
-            ring,
+            ring: core::ptr::from_mut(ring),
             pos: 0,
             len,
             head,
+            _marker: core::marker::PhantomData,
         }
     }
 }
@@ -103,8 +117,11 @@ impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Iter
         }
         let idx = self.head.wrapping_add(self.pos) & (N - 1);
         self.pos += 1;
+        // SAFETY: `ring` is a valid pointer derived from `&mut SpillRing` in `new()`.
+        // Each index is yielded exactly once (pos increments), so no aliasing occurs.
+        // The `UnsafeCell` in each slot permits mutable access through a raw pointer.
         Some(unsafe {
-            let slot = &self.ring.buffer[idx];
+            let slot = &(*self.ring).buffer[idx];
             &mut *(*slot.data.get()).as_mut_ptr()
         })
     }
@@ -123,18 +140,6 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> ExactSiz
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> core::iter::FusedIterator
     for SpillRingIterMut<'_, T, N, S>
 {
-}
-
-impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> IntoIterator
-    for &'a SpillRing<T, N, S>
-{
-    type Item = &'a T;
-    type IntoIter = SpillRingIter<'a, T, N, S>;
-
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        SpillRingIter::new(self)
-    }
 }
 
 impl<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> IntoIterator

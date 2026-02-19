@@ -24,12 +24,6 @@ pub trait FromBytes: Sized {
     fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError>;
 }
 
-/// Zero-copy view into serialized bytes.
-pub trait ViewBytes<'a>: Sized {
-    /// Create a view into the bytes without copying.
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError>;
-}
-
 /// Convenience methods for ToBytes types.
 pub trait ToBytesExt: ToBytes {
     /// Serialize to a new Vec.
@@ -85,8 +79,11 @@ pub(crate) fn serialize_to_vec(
     let mut buf = alloc::vec![0u8; hint];
     let n = match value.to_bytes(&mut buf) {
         Ok(n) => n,
-        Err(BytesError::BufferTooSmall { needed, .. }) => {
-            buf.resize(needed, 0);
+        Err(BytesError::BufferTooSmall { .. }) => {
+            // Don't trust `needed` from the error — it may be relative to a
+            // sub-slice deep in a nested to_bytes call. Compute the true size.
+            let exact = value.byte_len().unwrap_or(buf.len() * 2);
+            buf.resize(exact, 0);
             value.to_bytes(&mut buf)?
         }
         Err(e) => return Err(e),

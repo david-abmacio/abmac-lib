@@ -27,43 +27,43 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Consumer
         self.rings.push(ring);
     }
 
-    /// Drain all items from all rings into a sink.
+    /// Collect producers back into this consumer for draining.
+    ///
+    /// Reunites producers with their consumer after threads complete.
+    pub fn collect(&mut self, producers: impl IntoIterator<Item = Producer<T, N, S>>) {
+        for producer in producers {
+            self.add_ring(producer.into_ring());
+        }
+    }
+
+    /// Drain all items from all rings into a spout.
     ///
     /// Items are drained in producer order, then FIFO within each producer.
-    pub fn drain<Spout2: Spout<T, Error = core::convert::Infallible>>(
+    pub fn drain<Out: Spout<T, Error = core::convert::Infallible>>(
         &mut self,
-        sink: &mut Spout2,
+        spout: &mut Out,
     ) {
         for ring in &mut self.rings {
-            let _ = sink.send_all(ring.drain());
+            let _ = spout.send_all(ring.drain());
         }
-        let _ = sink.flush();
+        let _ = spout.flush();
     }
 
     /// Get the number of producers/rings.
+    #[must_use]
     pub fn num_producers(&self) -> usize {
         self.rings.len()
     }
 
     /// Check if all rings are empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.rings.iter().all(|r| r.is_empty())
+        self.rings.iter().all(SpillRing::is_empty)
     }
 
     /// Get total items across all rings.
+    #[must_use]
     pub fn len(&self) -> usize {
-        self.rings.iter().map(|r| r.len()).sum()
-    }
-}
-
-/// Collect producers back into a consumer for draining.
-///
-/// This is a helper to reunite producers with their consumer after threads complete.
-pub fn collect<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>>(
-    producers: impl IntoIterator<Item = Producer<T, N, S>>,
-    consumer: &mut Consumer<T, N, S>,
-) {
-    for producer in producers {
-        consumer.add_ring(producer.into_ring());
+        self.rings.iter().map(SpillRing::len).sum()
     }
 }

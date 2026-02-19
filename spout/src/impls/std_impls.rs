@@ -2,6 +2,7 @@ use std::sync::mpsc;
 
 use crate::Spout;
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct ChannelSpout<T> {
     sender: mpsc::Sender<T>,
@@ -14,11 +15,13 @@ impl<T> ChannelSpout<T> {
     }
 
     /// Get a reference to the underlying sender.
+    #[must_use]
     pub fn sender(&self) -> &mpsc::Sender<T> {
         &self.sender
     }
 
     /// Consume the spout and return the sender.
+    #[must_use]
     pub fn into_sender(self) -> mpsc::Sender<T> {
         self.sender
     }
@@ -56,6 +59,7 @@ impl<T> Spout<T> for ChannelSpout<T> {
 /// assert_eq!(rx.recv().unwrap(), 1);
 /// assert_eq!(rx.recv().unwrap(), 2);
 /// ```
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct SyncChannelSpout<T> {
     sender: mpsc::SyncSender<T>,
@@ -68,11 +72,13 @@ impl<T> SyncChannelSpout<T> {
     }
 
     /// Get a reference to the underlying sender.
+    #[must_use]
     pub fn sender(&self) -> &mpsc::SyncSender<T> {
         &self.sender
     }
 
     /// Consume the spout and return the sender.
+    #[must_use]
     pub fn into_sender(self) -> mpsc::SyncSender<T> {
         self.sender
     }
@@ -107,6 +113,8 @@ impl<E: core::fmt::Display> core::fmt::Display for MutexSpoutError<E> {
         }
     }
 }
+
+impl<E: core::fmt::Debug + core::fmt::Display> core::error::Error for MutexSpoutError<E> {}
 
 /// Thread-safe spout wrapper using `Arc<Mutex<S>>`.
 ///

@@ -1,13 +1,10 @@
-use bytecast::{FromBytes, Immutable, IntoBytes, KnownLayout, ToBytes, ZcFromBytes, ZeroCopyType};
+use bytecast::{DeriveFromBytes, DeriveToBytes, FromBytes, ToBytes};
 
-#[derive(ZcFromBytes, IntoBytes, Immutable, KnownLayout, Debug, PartialEq)]
-#[repr(C)]
+#[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
 struct Point {
     x: i32,
     y: i32,
 }
-
-impl ZeroCopyType for Point {}
 
 fn main() {
     let p = Point { x: 10, y: 20 };

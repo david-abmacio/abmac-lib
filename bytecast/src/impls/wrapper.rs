@@ -1,96 +1,124 @@
-//! Blanket implementations over zerocopy for fixed-size types.
+//! Little-endian implementations for primitive types, unit, and arrays.
 //!
-//! This module provides automatic `ToBytes` and `FromBytes` implementations
-//! for any type that implements zerocopy's traits AND our marker trait.
-//! Users interact only with bytecast - zerocopy is an internal detail.
+//! All multi-byte primitives serialize as **little-endian** regardless of
+//! platform, ensuring a deterministic and portable wire format.
 
 use crate::{BytesError, FromBytes, ToBytes};
 
-/// Marker trait for types that should use zerocopy for serialization.
-///
-/// This trait is automatically implemented for all primitive types.
-/// For custom `#[repr(C)]` structs, use the re-exported zerocopy derives
-/// and implement this marker to get automatic `ToBytes`/`FromBytes`.
-///
-/// # Example
-/// ```
-/// use bytecast::{ToBytes, FromBytes, ZeroCopyType, ZcFromBytes, IntoBytes, Immutable, KnownLayout};
-///
-/// #[derive(ZcFromBytes, IntoBytes, Immutable, KnownLayout, Debug, PartialEq)]
-/// #[repr(C)]
-/// struct Point { x: i32, y: i32 }
-///
-/// impl ZeroCopyType for Point {}
-///
-/// // Now Point has ToBytes/FromBytes automatically
-/// let p = Point { x: 10, y: 20 };
-/// let mut buf = [0u8; 8];
-/// p.to_bytes(&mut buf).unwrap();
-///
-/// let (p2, _) = Point::from_bytes(&buf).unwrap();
-/// assert_eq!(p, p2);
-/// ```
-pub trait ZeroCopyType {}
+// Macro-generated LE impls for all numeric primitives.
+macro_rules! impl_le_primitive {
+    ($($ty:ty),+) => { $(
+        impl ToBytes for $ty {
+            const MAX_SIZE: Option<usize> = Some(core::mem::size_of::<$ty>());
 
-// Implement marker for all primitives that zerocopy fully supports
-impl ZeroCopyType for u8 {}
-impl ZeroCopyType for u16 {}
-impl ZeroCopyType for u32 {}
-impl ZeroCopyType for u64 {}
-impl ZeroCopyType for u128 {}
-impl ZeroCopyType for i8 {}
-impl ZeroCopyType for i16 {}
-impl ZeroCopyType for i32 {}
-impl ZeroCopyType for i64 {}
-impl ZeroCopyType for i128 {}
-impl ZeroCopyType for f32 {}
-impl ZeroCopyType for f64 {}
-impl ZeroCopyType for () {}
-impl<T: ZeroCopyType, const N: usize> ZeroCopyType for [T; N] {}
+            #[inline]
+            fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+                const N: usize = core::mem::size_of::<$ty>();
+                if buf.len() < N {
+                    return Err(BytesError::BufferTooSmall { needed: N, available: buf.len() });
+                }
+                buf[..N].copy_from_slice(&self.to_le_bytes());
+                Ok(N)
+            }
+        }
 
-/// Blanket impl: any type implementing zerocopy's IntoBytes + Immutable
-/// AND our marker trait automatically implements bytecast's ToBytes.
-impl<T> ToBytes for T
-where
-    T: zerocopy::IntoBytes + zerocopy::Immutable + ZeroCopyType,
-{
-    const MAX_SIZE: Option<usize> = Some(core::mem::size_of::<T>());
+        impl FromBytes for $ty {
+            #[inline]
+            fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+                const N: usize = core::mem::size_of::<$ty>();
+                if buf.len() < N {
+                    return Err(BytesError::UnexpectedEof { needed: N, available: buf.len() });
+                }
+                let arr: [u8; N] = buf[..N].try_into().unwrap();
+                Ok((<$ty>::from_le_bytes(arr), N))
+            }
+        }
+    )+ };
+}
+
+impl_le_primitive!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, f32, f64);
+
+// Unit type — zero-size, no bytes written or read.
+impl ToBytes for () {
+    const MAX_SIZE: Option<usize> = Some(0);
 
     #[inline]
-    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
-        let bytes = zerocopy::IntoBytes::as_bytes(self);
-        let len = bytes.len();
-        if buf.len() < len {
-            return Err(BytesError::BufferTooSmall {
-                needed: len,
-                available: buf.len(),
-            });
-        }
-        buf[..len].copy_from_slice(bytes);
-        Ok(len)
+    fn to_bytes(&self, _buf: &mut [u8]) -> Result<usize, BytesError> {
+        Ok(0)
     }
 }
 
-/// Blanket impl: any type implementing zerocopy's FromBytes + KnownLayout
-/// AND our marker trait automatically implements bytecast's FromBytes.
-impl<T> FromBytes for T
-where
-    T: zerocopy::FromBytes + zerocopy::KnownLayout + ZeroCopyType,
-{
+impl FromBytes for () {
     #[inline]
-    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
-        let len = core::mem::size_of::<T>();
-        if buf.len() < len {
-            return Err(BytesError::UnexpectedEof {
-                needed: len,
-                available: buf.len(),
-            });
+    fn from_bytes(_buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        Ok(((), 0))
+    }
+}
+
+// Arrays — element-by-element serialization.
+impl<T: ToBytes, const N: usize> ToBytes for [T; N] {
+    const MAX_SIZE: Option<usize> = match T::MAX_SIZE {
+        Some(s) => Some(s * N),
+        None => None,
+    };
+
+    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+        let mut offset = 0;
+        for item in self {
+            offset += item.to_bytes(&mut buf[offset..])?;
         }
-        let value = zerocopy::FromBytes::read_from_bytes(&buf[..len]).map_err(|_| {
-            BytesError::InvalidData {
-                message: "zerocopy read failed",
+        Ok(offset)
+    }
+
+    fn byte_len(&self) -> Option<usize> {
+        let mut total = 0;
+        for item in self {
+            total += item.byte_len()?;
+        }
+        Some(total)
+    }
+}
+
+impl<T: FromBytes, const N: usize> FromBytes for [T; N] {
+    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        use core::mem::MaybeUninit;
+
+        struct DropGuard<T, const N: usize> {
+            arr: [MaybeUninit<T>; N],
+            init: usize,
+        }
+
+        impl<T, const N: usize> Drop for DropGuard<T, N> {
+            fn drop(&mut self) {
+                for slot in &mut self.arr[..self.init] {
+                    // SAFETY: elements [0..init) were written by `slot.write()`.
+                    unsafe { slot.assume_init_drop() };
+                }
             }
-        })?;
-        Ok((value, len))
+        }
+
+        let mut guard = DropGuard::<T, N> {
+            // SAFETY: An array of MaybeUninit<T> requires no initialization.
+            arr: unsafe { MaybeUninit::uninit().assume_init() },
+            init: 0,
+        };
+        let mut offset = 0;
+        for i in 0..N {
+            let (item, n) = T::from_bytes(&buf[offset..])?;
+            guard.arr[i].write(item);
+            guard.init += 1;
+            offset += n;
+        }
+        // All N elements initialized — take ownership, inhibit guard's Drop.
+        let arr = core::mem::replace(
+            &mut guard.arr,
+            // SAFETY: Replacing with uninit is fine — guard.init stays at N
+            // but we immediately forget the guard so Drop never runs.
+            unsafe { MaybeUninit::uninit().assume_init() },
+        );
+        core::mem::forget(guard);
+        // SAFETY: All N elements were initialized in the loop above.
+        let arr = arr.map(|slot| unsafe { slot.assume_init() });
+        Ok((arr, offset))
     }
 }

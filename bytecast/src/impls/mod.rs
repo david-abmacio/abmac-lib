@@ -1,18 +1,24 @@
-//! Native implementations for types not covered by zerocopy.
+//! Native implementations for built-in types.
 //!
-//! Zerocopy cannot handle:
+//! All multi-byte primitives use little-endian wire format (see `wrapper` module).
+//! Types requiring validation or variable-length encoding are implemented here:
 //! - `bool` / `char` - not all bit patterns are valid
-//! - `usize` / `isize` - platform-dependent size
-//! - `Option<T>` - discriminant + variable payload
-//! - `Vec<T>` / `String` - variable length (alloc feature)
+//! - `usize` / `isize` - platform-dependent size, serialized as u64/i64
+//! - `Option<T>` / `Result<T, E>` - discriminant + variable payload
+//! - `Range<T>` / `RangeInclusive<T>` - start + end
+//! - `NonZero*` - validated on decode
+//! - `Vec<T>` / `String` / collections - variable length (alloc/std features)
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
 
+#[cfg(feature = "std")]
+pub mod std_impls;
+
 pub mod tuple;
 pub mod wrapper;
 
-use crate::{BytesError, FromBytes, ToBytes, ViewBytes};
+use crate::{BytesError, FromBytes, ToBytes};
 
 // bool - needs validation (only 0 or 1 valid)
 impl ToBytes for bool {
@@ -113,7 +119,7 @@ impl FromBytes for isize {
     }
 }
 
-// Option<T> - zerocopy cannot handle this (discriminant + variable payload)
+// Option<T> - discriminant + variable payload
 impl<T: ToBytes> ToBytes for Option<T> {
     const MAX_SIZE: Option<usize> = match T::MAX_SIZE {
         Some(s) => Some(1 + s),
@@ -242,29 +248,95 @@ impl<T: FromBytes, E: FromBytes> FromBytes for Result<T, E> {
     }
 }
 
-// ViewBytes implementations for zero-copy views
-impl<'a> ViewBytes<'a> for &'a [u8] {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        Ok(bytes)
+// Range<T> - serialized as start then end
+impl<T: ToBytes> ToBytes for core::ops::Range<T> {
+    const MAX_SIZE: Option<usize> = match T::MAX_SIZE {
+        Some(s) => Some(s * 2),
+        None => None,
+    };
+
+    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+        let n1 = self.start.to_bytes(buf)?;
+        let n2 = self.end.to_bytes(&mut buf[n1..])?;
+        Ok(n1 + n2)
+    }
+
+    fn byte_len(&self) -> Option<usize> {
+        Some(self.start.byte_len()? + self.end.byte_len()?)
     }
 }
 
-impl<'a> ViewBytes<'a> for &'a str {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        core::str::from_utf8(bytes).map_err(|_| BytesError::InvalidData {
-            message: "invalid UTF-8",
-        })
+impl<T: FromBytes> FromBytes for core::ops::Range<T> {
+    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        let (start, n1) = T::from_bytes(buf)?;
+        let (end, n2) = T::from_bytes(&buf[n1..])?;
+        Ok((start..end, n1 + n2))
     }
 }
 
-impl<'a, const N: usize> ViewBytes<'a> for &'a [u8; N] {
-    fn view(bytes: &'a [u8]) -> Result<Self, BytesError> {
-        if bytes.len() < N {
-            return Err(BytesError::UnexpectedEof {
-                needed: N,
-                available: bytes.len(),
-            });
+// RangeInclusive<T> - serialized as start then end
+impl<T: ToBytes> ToBytes for core::ops::RangeInclusive<T> {
+    const MAX_SIZE: Option<usize> = match T::MAX_SIZE {
+        Some(s) => Some(s * 2),
+        None => None,
+    };
+
+    fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+        let n1 = self.start().to_bytes(buf)?;
+        let n2 = self.end().to_bytes(&mut buf[n1..])?;
+        Ok(n1 + n2)
+    }
+
+    fn byte_len(&self) -> Option<usize> {
+        Some(self.start().byte_len()? + self.end().byte_len()?)
+    }
+}
+
+impl<T: FromBytes> FromBytes for core::ops::RangeInclusive<T> {
+    fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+        let (start, n1) = T::from_bytes(buf)?;
+        let (end, n2) = T::from_bytes(&buf[n1..])?;
+        Ok((start..=end, n1 + n2))
+    }
+}
+
+// NonZero types - same wire format as inner, validated on decode
+macro_rules! impl_nonzero {
+    ($nz:ty, $inner:ty) => {
+        impl ToBytes for $nz {
+            const MAX_SIZE: Option<usize> = <$inner>::MAX_SIZE;
+
+            #[inline]
+            fn to_bytes(&self, buf: &mut [u8]) -> Result<usize, BytesError> {
+                self.get().to_bytes(buf)
+            }
         }
-        Ok(bytes[..N].try_into().unwrap())
-    }
+
+        impl FromBytes for $nz {
+            #[inline]
+            fn from_bytes(buf: &[u8]) -> Result<(Self, usize), BytesError> {
+                let (v, n) = <$inner>::from_bytes(buf)?;
+                let nz = <$nz>::new(v).ok_or(BytesError::InvalidData {
+                    message: concat!(stringify!($nz), " must not be zero"),
+                })?;
+                Ok((nz, n))
+            }
+        }
+    };
 }
+
+use core::num::{
+    NonZeroI8, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI128, NonZeroU8, NonZeroU16, NonZeroU32,
+    NonZeroU64, NonZeroU128,
+};
+
+impl_nonzero!(NonZeroU8, u8);
+impl_nonzero!(NonZeroU16, u16);
+impl_nonzero!(NonZeroU32, u32);
+impl_nonzero!(NonZeroU64, u64);
+impl_nonzero!(NonZeroU128, u128);
+impl_nonzero!(NonZeroI8, i8);
+impl_nonzero!(NonZeroI16, i16);
+impl_nonzero!(NonZeroI32, i32);
+impl_nonzero!(NonZeroI64, i64);
+impl_nonzero!(NonZeroI128, i128);

@@ -5,6 +5,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::{Flush, Spout};
 
 /// Drops all items.
+#[must_use]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DropSpout;
 
@@ -18,6 +19,7 @@ impl<T> Spout<T> for DropSpout {
 }
 
 /// Collects evicted items into a Vec.
+#[must_use]
 #[derive(Debug, Clone, Default)]
 pub struct CollectSpout<T> {
     items: Vec<T>,
@@ -30,6 +32,7 @@ impl<T> CollectSpout<T> {
     }
 
     /// Get collected items.
+    #[must_use]
     pub fn items(&self) -> &[T] {
         &self.items
     }
@@ -40,6 +43,7 @@ impl<T> CollectSpout<T> {
     }
 
     /// Consume spout and return collected items.
+    #[must_use]
     pub fn into_items(self) -> Vec<T> {
         self.items
     }
@@ -62,8 +66,16 @@ impl<T> Spout<T> for CollectSpout<T> {
 }
 
 /// Calls a closure for each item.
+#[must_use]
 #[derive(Debug)]
-pub struct FnSpout<F>(pub F);
+pub struct FnSpout<F>(F);
+
+impl<F> FnSpout<F> {
+    /// Create a new closure-based spout.
+    pub fn new(f: F) -> Self {
+        Self(f)
+    }
+}
 
 impl<T, F: FnMut(T)> Spout<T> for FnSpout<F> {
     type Error = core::convert::Infallible;
@@ -76,6 +88,7 @@ impl<T, F: FnMut(T)> Spout<T> for FnSpout<F> {
 }
 
 /// Calls separate closures for send and flush.
+#[must_use]
 #[derive(Debug)]
 pub struct FnFlushSpout<S, F> {
     send: S,
@@ -114,6 +127,16 @@ where
     FnFlushSpout::new(send, flush)
 }
 
+/// Multi-producer spout with unique IDs per clone.
+///
+/// Each clone receives a unique `producer_id` (0, 1, 2, ...) and lazily
+/// creates its own inner spout via the factory on first `send`. This allows
+/// independent per-producer resources (files, channels, framed streams)
+/// while sharing a single factory.
+///
+/// Clone is cheap — only the factory is cloned, the inner spout is created
+/// on demand.
+#[must_use]
 pub struct ProducerSpout<S, F> {
     /// The inner spout (created lazily on first send)
     inner: Option<S>,
@@ -123,6 +146,15 @@ pub struct ProducerSpout<S, F> {
     producer_id: usize,
     /// Shared counter for assigning IDs
     next_id: Arc<AtomicUsize>,
+}
+
+impl<S, F> core::fmt::Debug for ProducerSpout<S, F> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ProducerSpout")
+            .field("producer_id", &self.producer_id)
+            .field("initialized", &self.inner.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S, F: Clone> Clone for ProducerSpout<S, F> {
@@ -175,10 +207,9 @@ where
         self.inner
     }
 
-    fn ensure_inner(&mut self) {
-        if self.inner.is_none() {
-            self.inner = Some((self.factory)(self.producer_id));
-        }
+    fn ensure_inner(&mut self) -> &mut S {
+        self.inner
+            .get_or_insert_with(|| (self.factory)(self.producer_id))
     }
 }
 
@@ -191,8 +222,7 @@ where
 
     #[inline]
     fn send(&mut self, item: T) -> Result<(), Self::Error> {
-        self.ensure_inner();
-        self.inner.as_mut().unwrap().send(item)
+        self.ensure_inner().send(item)
     }
 
     #[inline]
@@ -204,6 +234,7 @@ where
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct BatchSpout<T, S> {
     pub(crate) buffer: Vec<T>,
@@ -270,6 +301,17 @@ impl<T, S: Spout<Vec<T>>> Spout<T> for BatchSpout<T, S> {
     }
 
     #[inline]
+    fn send_all(&mut self, items: impl Iterator<Item = T>) -> Result<(), Self::Error> {
+        self.buffer.extend(items);
+        while self.buffer.len() >= self.threshold {
+            let rest = self.buffer.split_off(self.threshold);
+            let batch = core::mem::replace(&mut self.buffer, rest);
+            self.sink.send(batch)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
         if !self.buffer.is_empty() {
             let batch = core::mem::replace(&mut self.buffer, Vec::with_capacity(self.threshold));
@@ -279,6 +321,7 @@ impl<T, S: Spout<Vec<T>>> Spout<T> for BatchSpout<T, S> {
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct ReduceSpout<T, R, F, S> {
     buffer: Vec<T>,
@@ -350,6 +393,18 @@ where
                 &mut self.buffer,
                 Vec::with_capacity(self.threshold),
             ));
+            self.sink.send(reduced)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn send_all(&mut self, items: impl Iterator<Item = T>) -> Result<(), Self::Error> {
+        self.buffer.extend(items);
+        while self.buffer.len() >= self.threshold {
+            let rest = self.buffer.split_off(self.threshold);
+            let batch = core::mem::replace(&mut self.buffer, rest);
+            let reduced = (self.reduce)(batch);
             self.sink.send(reduced)?;
         }
         Ok(())

@@ -6,11 +6,11 @@
 //!
 //! Rules: R1 Load (blue->red), R2 Store (red->blue), R3 Compute, R4 Delete.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use core::hash::Hash;
 use hashbrown::HashSet;
+
 /// Memory hierarchy: Red (fast) or Blue (slow/serialized).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PebbleColor {
@@ -27,19 +27,7 @@ pub enum PebbleOperation<T> {
     Delete(T),
 }
 
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum PebbleError {
-        #[display("fast memory exhausted: {current}/{max_size}")]
-        FastMemoryExhausted { current: usize, max_size: usize },
-
-        #[display("invalid operation: {operation}")]
-        InvalidOperation { operation: String },
-
-        #[display("node not found: {node}")]
-        NotFound { node: String },
-    }
-}
+pub use crate::errors::game::PebbleError;
 
 pub(crate) type Result<T> = core::result::Result<T, PebbleError>;
 
@@ -60,17 +48,6 @@ impl PebbleRules {
 
     pub fn can_store<T: Copy + Eq + Hash>(node: T, red_pebbles: &HashSet<T>) -> bool {
         red_pebbles.contains(&node)
-    }
-
-    pub fn can_compute<T: Copy + Eq + Hash>(
-        node: T,
-        dependencies: &[T],
-        red_pebbles: &HashSet<T>,
-        max_red_pebbles: usize,
-    ) -> bool {
-        let deps_ok = dependencies.iter().all(|dep| red_pebbles.contains(dep));
-        let space_ok = red_pebbles.contains(&node) || red_pebbles.len() < max_red_pebbles;
-        deps_ok && space_ok
     }
 
     pub fn can_delete<T: Copy + Eq + Hash>(node: T, red_pebbles: &HashSet<T>) -> bool {
@@ -280,7 +257,7 @@ impl<T: Copy + Eq + Hash + fmt::Debug> PebbleGame<T> {
 
     /// Move red→blue. Increments I/O.
     #[cfg(debug_assertions)]
-    #[allow(dead_code)] // used only in #[cfg(not(feature = "cold-buffer"))]
+    #[allow(dead_code)]
     pub(crate) fn move_to_blue(&mut self, node: T) {
         assert!(
             self.red_pebbles.remove(&node),

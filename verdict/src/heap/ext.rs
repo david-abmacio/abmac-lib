@@ -142,12 +142,11 @@ impl<T> OptionExt<T> for Option<T> {
         error: E,
         message: impl Into<String>,
     ) -> Result<T, Context<E, Dynamic>> {
-        match self {
-            Some(v) => Ok(v),
-            None => {
-                let frame = Frame::here(message);
-                Err(Context::new(error).with_frame(frame))
-            }
+        if let Some(v) = self {
+            Ok(v)
+        } else {
+            let frame = Frame::here(message);
+            Err(Context::new(error).with_frame(frame))
         }
     }
 
@@ -156,14 +155,13 @@ impl<T> OptionExt<T> for Option<T> {
         self,
         f: F,
     ) -> Result<T, Context<E, Dynamic>> {
-        match self {
-            Some(v) => Ok(v),
-            None => {
-                let location = core::panic::Location::caller();
-                let (error, message) = f();
-                let frame = Frame::at(location, message);
-                Err(Context::new(error).with_frame(frame))
-            }
+        if let Some(v) = self {
+            Ok(v)
+        } else {
+            let location = core::panic::Location::caller();
+            let (error, message) = f();
+            let frame = Frame::at(location, message);
+            Err(Context::new(error).with_frame(frame))
         }
     }
 }

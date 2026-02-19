@@ -52,7 +52,7 @@ fn load_dashboard() -> Result<String, Ctx<ApiError>> {
 //   |-> loading dashboard, at src/main.rs:8:5
 ```
 
-Propogating errors with the `?` operator works — `From<E>` wraps the error automatically. The tradeoff is no context frame, but the backtrace is captured.
+Propagating errors with the `?` operator works — `From<E>` wraps the error automatically. The tradeoff is no context frame, but the backtrace is captured.
 
 ```rust
 fn get_user(id: u32) -> Result<String, Ctx<ApiError>> {

@@ -5,27 +5,14 @@
 //! Not thread-safe. Use `Mutex` or `RwLock` for concurrent access.
 
 mod critical_paths;
+mod eviction;
 mod validation;
 
 use alloc::vec::Vec;
 use core::hash::Hash;
 use hashbrown::{HashMap, HashSet};
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum DAGError {
-        #[display("missing dependency: {dep_id}")]
-        MissingDependency { dep_id: alloc::string::String },
 
-        #[display("self-dependency: {node_id}")]
-        SelfDependency { node_id: alloc::string::String },
-
-        #[display("node exists: {node_id}")]
-        NodeExists { node_id: alloc::string::String },
-
-        #[display("cycle detected: {node_id}")]
-        CycleDetected { node_id: alloc::string::String },
-    }
-}
+pub use crate::errors::dag::DAGError;
 
 /// DAG node representing a compressible state.
 #[derive(Debug, Clone)]
@@ -81,6 +68,7 @@ impl<T> DAGNode<T> {
 #[must_use]
 pub struct DAGStats {
     pub total_nodes: usize,
+    pub edge_count: usize,
     pub root_nodes: usize,
     pub leaf_nodes: usize,
     pub max_depth: usize,
@@ -272,35 +260,6 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
             .unwrap_or(0)
     }
 
-    /// Build rebuild order for nodes not in `available`, sorted by depth.
-    pub fn rebuild_order(&self, target: T, available: &HashSet<T>) -> Vec<T> {
-        // BFS to find all required nodes not in available set
-        let mut required = HashSet::new();
-        let mut to_visit = Vec::new();
-        to_visit.push(target);
-
-        while let Some(node_id) = to_visit.pop() {
-            if required.contains(&node_id) || available.contains(&node_id) {
-                continue;
-            }
-            required.insert(node_id);
-
-            if let Some(node) = self.nodes.get(&node_id) {
-                for dep in &node.dependencies {
-                    if !available.contains(dep) && !required.contains(dep) {
-                        to_visit.push(*dep);
-                    }
-                }
-            }
-        }
-
-        // Sort by rebuild_depth (ascending) for correct dependency order
-        let mut order: Vec<T> = required.into_iter().collect();
-        order.sort_by_key(|id| self.nodes.get(id).map(|n| n.rebuild_depth).unwrap_or(0));
-
-        order
-    }
-
     #[inline]
     pub fn get_node(&self, id: T) -> Option<&DAGNode<T>> {
         self.nodes.get(&id)
@@ -312,46 +271,18 @@ impl<T: Copy + Eq + Hash + core::fmt::Debug> ComputationDAG<T> {
         }
     }
 
-    /// Get nodes with no active dependents, sorted by access frequency.
-    pub fn get_eviction_candidates<V>(&self, active_nodes: &HashMap<T, V>) -> Vec<T> {
-        let mut candidates = Vec::new();
-
-        for active_id in active_nodes.keys() {
-            if let Some(node) = self.nodes.get(active_id) {
-                let has_active_dependents = node
-                    .dependents
-                    .iter()
-                    .any(|dep| active_nodes.contains_key(dep));
-
-                if !has_active_dependents {
-                    candidates.push(*active_id);
-                }
-            }
-        }
-
-        // Sort by access frequency (LRU) and creation time
-        candidates.sort_by_key(|id| match self.nodes.get(id) {
-            Some(node) => (node.access_frequency, node.creation_time),
-            None => (u64::MAX, u64::MAX),
-        });
-
-        candidates
-    }
-
     pub fn stats(&self) -> DAGStats {
         let max_depth = self.calculate_max_depth();
+        let edge_count: usize = self.nodes.values().map(|n| n.dependencies.len()).sum();
         let avg_fanout = if !self.nodes.is_empty() {
-            self.nodes
-                .values()
-                .map(|n| n.dependents.len())
-                .sum::<usize>() as f64
-                / self.nodes.len() as f64
+            edge_count as f64 / self.nodes.len() as f64
         } else {
             0.0
         };
 
         DAGStats {
             total_nodes: self.nodes.len(),
+            edge_count,
             root_nodes: self.roots.len(),
             leaf_nodes: self.leaves.len(),
             max_depth,

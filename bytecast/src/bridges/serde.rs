@@ -11,7 +11,21 @@ use crate::{FromBytes, ToBytes, ToBytesExt};
 /// Serialization format depends on the serde format:
 /// - Human-readable (JSON, TOML): bytes are base64-encoded as a string
 /// - Binary (bincode, postcard): bytes are written as a raw byte slice
+#[derive(Debug, Clone, PartialEq)]
 pub struct BytecastSerde<T>(pub T);
+
+impl<T> From<T> for BytecastSerde<T> {
+    fn from(value: T) -> Self {
+        BytecastSerde(value)
+    }
+}
+
+impl<T> BytecastSerde<T> {
+    /// Unwrap the inner value.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
 
 impl<T: ToBytes> Serialize for BytecastSerde<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

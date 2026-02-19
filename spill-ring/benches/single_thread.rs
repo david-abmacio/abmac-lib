@@ -13,8 +13,8 @@ use std::collections::VecDeque;
 use std::hint::black_box;
 
 /// Push throughput with DropSpout (items discarded on eviction).
-fn push_mut_drop_sink(c: &mut Criterion) {
-    let mut group = c.benchmark_group("single/push_mut/drop_sink");
+fn push_mut_drop_spout(c: &mut Criterion) {
+    let mut group = c.benchmark_group("single/push_mut/drop_spout");
 
     for capacity in [16, 64, 256, 1024] {
         group.throughput(Throughput::Elements(10_000));
@@ -67,10 +67,10 @@ fn push_mut_drop_sink(c: &mut Criterion) {
 
 /// Push throughput with CollectSpout (items collected on eviction).
 ///
-/// CollectSpout accumulates items, so the ring + sink must be recreated
+/// CollectSpout accumulates items, so the ring + spout must be recreated
 /// each iteration. Warming cost is included in measurement.
-fn push_mut_collect_sink(c: &mut Criterion) {
-    let mut group = c.benchmark_group("single/push_mut/collect_sink");
+fn push_mut_collect_spout(c: &mut Criterion) {
+    let mut group = c.benchmark_group("single/push_mut/collect_spout");
 
     for capacity in [16, 64, 256] {
         group.throughput(Throughput::Elements(10_000));
@@ -79,20 +79,20 @@ fn push_mut_collect_sink(c: &mut Criterion) {
             &capacity,
             |b, &cap| match cap {
                 16 => b.iter(|| {
-                    let mut ring: SpillRing<u64, 16, _> = SpillRing::with_sink(CollectSpout::new());
+                    let mut ring: SpillRing<u64, 16, _> = SpillRing::builder().spout(CollectSpout::new()).build();
                     for i in 0..10_000u64 {
                         ring.push_mut(black_box(i));
                     }
                 }),
                 64 => b.iter(|| {
-                    let mut ring: SpillRing<u64, 64, _> = SpillRing::with_sink(CollectSpout::new());
+                    let mut ring: SpillRing<u64, 64, _> = SpillRing::builder().spout(CollectSpout::new()).build();
                     for i in 0..10_000u64 {
                         ring.push_mut(black_box(i));
                     }
                 }),
                 256 => b.iter(|| {
                     let mut ring: SpillRing<u64, 256, _> =
-                        SpillRing::with_sink(CollectSpout::new());
+                        SpillRing::builder().spout(CollectSpout::new()).build();
                     for i in 0..10_000u64 {
                         ring.push_mut(black_box(i));
                     }
@@ -583,8 +583,8 @@ fn eviction_overhead(c: &mut Criterion) {
 
 criterion_group!(
     throughput_benches,
-    push_mut_drop_sink,
-    push_mut_collect_sink,
+    push_mut_drop_spout,
+    push_mut_collect_spout,
     pop_mut_throughput,
     push_pop_mut_interleaved,
     item_size_impact,

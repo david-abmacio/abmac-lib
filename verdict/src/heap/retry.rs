@@ -1,7 +1,7 @@
 //! Retry helpers with typestate tracking.
 
-use alloc::{collections::VecDeque, format};
-use core::fmt::{self, Display};
+use alloc::{collections::VecDeque, string::String};
+use core::fmt::{self, Display, Write};
 
 use spout::DropSpout;
 
@@ -100,6 +100,12 @@ impl<E, Overflow: spout::Spout<Frame, Error = core::convert::Infallible>>
 /// Returns [`RetryOutcome::Permanent`] if the operation returns a non-retryable
 /// error, or [`RetryOutcome::Exhausted`] if all attempts produce retryable errors.
 ///
+/// # Context Retention
+///
+/// Only the **last** temporary attempt's context (frames, backtrace, overflow)
+/// is preserved. Prior attempts' context is dropped. If you need visibility
+/// into all attempts, use a custom retry loop with a collecting overflow spout.
+///
 /// # Example
 ///
 /// ```
@@ -144,11 +150,14 @@ where
 {
     let max_attempts = max_attempts.max(1);
 
+    let mut attempt_msg = String::with_capacity(32);
+    write!(attempt_msg, "attempt 1/{max_attempts}").unwrap();
+
     // Run the first attempt outside the loop to establish a non-Option binding.
     let mut last_temp = match f() {
         Ok(v) => return Ok(v),
         Err(e) => match e.resolve() {
-            Resolved::Temporary(temp) => temp.with_ctx(format!("attempt 1/{max_attempts}")),
+            Resolved::Temporary(temp) => temp.with_ctx(attempt_msg),
             Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
             Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
         },
@@ -159,7 +168,9 @@ where
             Ok(v) => return Ok(v),
             Err(e) => match e.resolve() {
                 Resolved::Temporary(temp) => {
-                    last_temp = temp.with_ctx(format!("attempt {attempt}/{max_attempts}"));
+                    let mut msg = String::with_capacity(32);
+                    write!(msg, "attempt {attempt}/{max_attempts}").unwrap();
+                    last_temp = temp.with_ctx(msg);
                 }
                 Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
                 Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
@@ -170,7 +181,11 @@ where
     Err(RetryOutcome::Exhausted(last_temp.exhaust()))
 }
 
-/// Execute with retries and a delay between attempts.
+/// Execute with retries and a synchronous delay between attempts.
+///
+/// This function calls [`std::thread::sleep`] between attempts, which blocks
+/// the current thread. Do not use inside an async runtime — use an
+/// async-aware retry loop with `tokio::time::sleep` or equivalent instead.
 ///
 /// # Errors
 ///
@@ -189,11 +204,14 @@ where
 {
     let max_attempts = max_attempts.max(1);
 
+    let mut attempt_msg = String::with_capacity(32);
+    write!(attempt_msg, "attempt 1/{max_attempts}").unwrap();
+
     // Run the first attempt outside the loop to establish a non-Option binding.
     let mut last_temp = match f() {
         Ok(v) => return Ok(v),
         Err(e) => match e.resolve() {
-            Resolved::Temporary(temp) => temp.with_ctx(format!("attempt 1/{max_attempts}")),
+            Resolved::Temporary(temp) => temp.with_ctx(attempt_msg),
             Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
             Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),
         },
@@ -206,7 +224,9 @@ where
             Ok(v) => return Ok(v),
             Err(e) => match e.resolve() {
                 Resolved::Temporary(temp) => {
-                    last_temp = temp.with_ctx(format!("attempt {attempt}/{max_attempts}"));
+                    let mut msg = String::with_capacity(32);
+                    write!(msg, "attempt {attempt}/{max_attempts}").unwrap();
+                    last_temp = temp.with_ctx(msg);
                 }
                 Resolved::Exhausted(ex) => return Err(RetryOutcome::Exhausted(ex)),
                 Resolved::Permanent(perm) => return Err(RetryOutcome::Permanent(perm)),

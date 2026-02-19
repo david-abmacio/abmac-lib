@@ -1,10 +1,9 @@
 use alloc::{borrow::Cow, string::String, vec, vec::Vec};
 
 use super::{
-    ByteCursor, ByteReader, ByteSerializer, FromBytes, FromBytesExt, ToBytes, ToBytesExt,
-    ZeroCopyType,
+    ByteCursor, ByteReader, ByteSerializer, BytesError, FromBytes, FromBytesExt, ToBytes,
+    ToBytesExt,
 };
-use zerocopy::{FromBytes as ZcFromBytes, Immutable, IntoBytes, KnownLayout};
 
 #[test]
 fn test_byte_serializer_new() {
@@ -138,27 +137,30 @@ fn test_string_unicode() {
     assert_eq!(consumed, written);
 }
 
-// Test zerocopy-derived struct via blanket impl
-#[derive(ZcFromBytes, IntoBytes, Immutable, KnownLayout, Debug, PartialEq)]
-#[repr(C)]
-struct Point {
-    x: i32,
-    y: i32,
-}
+#[cfg(feature = "derive")]
+mod derive_tests {
+    use super::*;
+    use crate::{DeriveFromBytes, DeriveToBytes};
 
-impl ZeroCopyType for Point {}
+    #[derive(DeriveToBytes, DeriveFromBytes, Debug, PartialEq)]
+    #[bytecast(crate = "crate")]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
 
-#[test]
-fn test_zerocopy_struct_roundtrip() {
-    let mut buf = [0u8; 8];
-    let value = Point { x: 100, y: -200 };
+    #[test]
+    fn test_derive_struct_roundtrip() {
+        let mut buf = [0u8; 8];
+        let value = Point { x: 100, y: -200 };
 
-    let written = value.to_bytes(&mut buf).unwrap();
-    assert_eq!(written, 8);
+        let written = value.to_bytes(&mut buf).unwrap();
+        assert_eq!(written, 8);
 
-    let (decoded, consumed) = Point::from_bytes(&buf).unwrap();
-    assert_eq!(decoded, value);
-    assert_eq!(consumed, 8);
+        let (decoded, consumed) = Point::from_bytes(&buf).unwrap();
+        assert_eq!(decoded, value);
+        assert_eq!(consumed, 8);
+    }
 }
 
 // ByteCursor tests
@@ -434,4 +436,130 @@ fn test_tuple_mixed() {
     assert_eq!(decoded, value);
 
     assert_eq!(<(u32, String)>::MAX_SIZE, None);
+}
+
+#[test]
+fn test_varint_rejects_5th_byte_overflow() {
+    // 5th byte = 0x1F — bits 4-6 would overflow u32, must be rejected.
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x1F];
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_varint_accepts_5th_byte_within_range() {
+    // 5th byte = 0x0F is valid (uses exactly 4 bits for u32).
+    // Encodes u32::MAX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F].
+    // This claims u32::MAX elements so from_bytes will fail on length,
+    // but NOT on the varint decode itself. Verify we get UnexpectedEof, not InvalidData.
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(matches!(result, Err(BytesError::UnexpectedEof { .. })));
+}
+
+#[test]
+fn test_varint_rejects_non_canonical() {
+    // Value 1 encoded as 2 bytes: [0x81, 0x00] instead of canonical [0x01]
+    let buf = [0x81, 0x00, 0x01]; // non-canonical length 1, then one byte of data
+    let result = Vec::<u8>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_vec_zst_rejects_oversized_length() {
+    // Craft a payload claiming u32::MAX elements of () (ZST).
+    // varint encoding of u32::MAX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F]
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = Vec::<()>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_vec_zst_valid_small() {
+    // A valid Vec<()> with 3 elements — length fits in remaining buffer.
+    let mut buf = [0u8; 64];
+    let original: Vec<()> = vec![(), (), ()];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = Vec::<()>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_vecdeque_zst_rejects_oversized_length() {
+    use alloc::collections::VecDeque;
+    let buf = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
+    let result = VecDeque::<()>::from_bytes(&buf);
+    assert!(result.is_err());
+}
+
+// --- BTreeSet tests ---
+
+#[test]
+fn test_btreeset_roundtrip() {
+    use alloc::collections::BTreeSet;
+    let original: BTreeSet<u32> = [3, 1, 4, 1, 5].into_iter().collect();
+    let mut buf = [0u8; 64];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeSet::<u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_btreeset_empty() {
+    use alloc::collections::BTreeSet;
+    let original: BTreeSet<u32> = BTreeSet::new();
+    let mut buf = [0u8; 8];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeSet::<u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+    assert_eq!(written, 1); // varint 0
+}
+
+#[test]
+fn test_btreeset_byte_len() {
+    use alloc::collections::BTreeSet;
+    let set: BTreeSet<u32> = [1, 2, 3].into_iter().collect();
+    // varint(3) = 1 byte, 3 * 4 bytes = 12, total = 13
+    assert_eq!(set.byte_len(), Some(13));
+}
+
+// --- BTreeMap tests ---
+
+#[test]
+fn test_btreemap_roundtrip() {
+    use alloc::collections::BTreeMap;
+    let mut original = BTreeMap::new();
+    original.insert(1u32, 10u64);
+    original.insert(2, 20);
+    original.insert(3, 30);
+    let mut buf = [0u8; 128];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeMap::<u32, u64>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+}
+
+#[test]
+fn test_btreemap_empty() {
+    use alloc::collections::BTreeMap;
+    let original: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut buf = [0u8; 8];
+    let written = original.to_bytes(&mut buf).unwrap();
+    let (decoded, consumed) = BTreeMap::<u32, u32>::from_bytes(&buf).unwrap();
+    assert_eq!(decoded, original);
+    assert_eq!(consumed, written);
+    assert_eq!(written, 1); // varint 0
+}
+
+#[test]
+fn test_btreemap_byte_len() {
+    use alloc::collections::BTreeMap;
+    let mut map = BTreeMap::new();
+    map.insert(1u32, 10u32);
+    map.insert(2, 20);
+    // varint(2) = 1 byte, 2 * (4 + 4) = 16, total = 17
+    assert_eq!(map.byte_len(), Some(17));
 }

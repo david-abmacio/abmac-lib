@@ -2,7 +2,13 @@
 
 pub mod memory;
 
-pub use memory::{InMemoryStorage, crc32};
+#[cfg(all(debug_assertions, feature = "std"))]
+pub mod debug;
+
+pub use memory::InMemoryStorage;
+
+#[cfg(all(debug_assertions, feature = "std"))]
+pub use debug::DebugFileStorage;
 
 use alloc::vec::Vec;
 use core::hash::Hash;
@@ -20,27 +26,13 @@ impl SessionId for u128 {}
 impl SessionId for u64 {}
 impl SessionId for () {}
 
-verdict::display_error! {
-    #[derive(Clone, PartialEq, Eq)]
-    pub enum StorageError {
-        #[display("checkpoint not found")]
-        NotFound,
+pub use crate::errors::storage::{IntegrityError, IntegrityErrorKind, StorageError};
 
-        #[display("checksum mismatch: expected {expected:#x}, got {actual:#x}")]
-        ChecksumMismatch { expected: u32, actual: u32 },
-
-        #[display("buffer too small: need {required} bytes, got {provided}")]
-        BufferTooSmall { required: usize, provided: usize },
-
-        #[display("I/O error")]
-        Io,
-
-        #[display("backend error: {message}")]
-        Backend { message: &'static str },
-
-        #[display("too many dependencies: maximum {max}, got {count}")]
-        TooManyDependencies { max: usize, count: usize },
-    }
+/// Remove checkpoints from storage. Complement to `Spout` for writes
+/// and [`CheckpointLoader`] for reads.
+pub trait CheckpointRemover<CId: Copy + Eq + Hash + core::fmt::Debug = u64> {
+    /// Remove a checkpoint by ID. Returns `true` if it existed.
+    fn remove(&mut self, state_id: CId) -> bool;
 }
 
 /// Load checkpoints from storage. Complement to `Spout` for writes.
@@ -117,7 +109,8 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
 
     /// Get dependencies as a slice.
     pub fn dependencies(&self) -> &[CId] {
-        &self.dependencies[..self.dep_count as usize]
+        let count = (self.dep_count as usize).min(MAX_DEPS);
+        &self.dependencies[..count]
     }
 
     /// Maximum dependencies this metadata can hold.
@@ -195,21 +188,6 @@ pub enum RecoveryMode {
     WarmRestart,
     /// Some checkpoints corrupted but recovered what we could
     PartialRecovery,
-}
-
-/// Checkpoint validation error.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IntegrityError {
-    pub state_id: alloc::string::String,
-    pub kind: IntegrityErrorKind,
-}
-
-/// Types of integrity errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IntegrityErrorKind {
-    ChecksumMismatch { expected: u32, actual: u32 },
-    MissingDependency { dep_id: alloc::string::String },
-    DeserializationFailed,
 }
 
 /// Storage with recovery support.

@@ -1,4 +1,4 @@
-//! Core implementation for spill_ring.
+//! Core implementation for `spill_ring`.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
@@ -19,9 +19,12 @@ mod tests;
 pub use builder::SpillRingBuilder;
 pub use error::PushError;
 pub use iter::{SpillRingIter, SpillRingIterMut};
-#[cfg(feature = "alloc")]
-pub use mpsc::{Consumer, MpscRing, Producer, collect};
 #[cfg(feature = "std")]
-pub use mpsc::{PoolBuilder, WorkerPool};
+pub use mpsc::{
+    Collector, FanInSpout, MergerHandle, PoolBuilder, SequencedCollector, StreamingFanIn,
+    StreamingMergers, UnorderedCollector, WorkerPanic, WorkerPool,
+};
+#[cfg(feature = "alloc")]
+pub use mpsc::{Consumer, MpscRing, Producer};
 pub use ring::{Drain, SpillRing};
 pub use traits::{RingConsumer, RingInfo, RingProducer, RingTrait};

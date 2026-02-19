@@ -131,7 +131,7 @@ fn mpsc_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark with CollectSpout sink to measure spout overhead.
+/// Benchmark with CollectSpout spout to measure spout overhead.
 fn spout_overhead(c: &mut Criterion) {
     let mut group = c.benchmark_group("spout_overhead");
 
@@ -140,7 +140,7 @@ fn spout_overhead(c: &mut Criterion) {
     let total = iterations_per_worker * num_workers as u64;
     group.throughput(Throughput::Elements(total));
 
-    // DropSpout (no-op sink)
+    // DropSpout (no-op spout)
     group.bench_function("drop_spout", |b| {
         let mut pool = MpscRing::<u64, 1024>::pool(num_workers).spawn(|ring, id, count: &u64| {
             for i in 0..*count {
@@ -153,10 +153,10 @@ fn spout_overhead(c: &mut Criterion) {
         });
     });
 
-    // CollectSpout (allocating sink)
+    // CollectSpout (allocating spout)
     group.bench_function("collect_spout", |b| {
         let mut pool =
-            MpscRing::<u64, 1024, _>::pool_with_sink(num_workers, CollectSpout::<u64>::new())
+            MpscRing::<u64, 1024, _>::pool_with_spout(num_workers, CollectSpout::<u64>::new())
                 .spawn(|ring, id, count: &u64| {
                     for i in 0..*count {
                         ring.push(black_box(id as u64 * 1_000_000 + i));

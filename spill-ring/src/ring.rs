@@ -26,6 +26,25 @@ impl<T> Slot<T> {
     }
 }
 
+/// Compile-time proof that `Slot<T>` has identical layout to `T`.
+/// Required for `push_slice`/`pop_slice` bulk `copy_nonoverlapping`.
+const _: () = {
+    // #[repr(transparent)] over UnsafeCell<MaybeUninit<T>> guarantees this,
+    // but an explicit assertion catches accidental changes to Slot's definition.
+    assert!(
+        core::mem::size_of::<Slot<u8>>() == core::mem::size_of::<u8>()
+            && core::mem::align_of::<Slot<u8>>() == core::mem::align_of::<u8>()
+    );
+    assert!(
+        core::mem::size_of::<Slot<u64>>() == core::mem::size_of::<u64>()
+            && core::mem::align_of::<Slot<u64>>() == core::mem::align_of::<u64>()
+    );
+    assert!(
+        core::mem::size_of::<Slot<u128>>() == core::mem::size_of::<u128>()
+            && core::mem::align_of::<Slot<u128>>() == core::mem::align_of::<u128>()
+    );
+};
+
 /// Maximum supported capacity (2^20 = ~1 million slots).
 /// Prevents accidental huge allocations from typos like `SpillRing<T, 1000000000>`.
 pub(crate) const MAX_CAPACITY: usize = 1 << 20;
@@ -40,9 +59,11 @@ pub struct SpillRing<T, const N: usize, S: Spout<T, Error = core::convert::Infal
     pub(crate) head: CellIndex,
     pub(crate) tail: CellIndex,
     pub(crate) buffer: [Slot<T>; N],
-    sink: SpoutCell<S>,
+    spout: SpoutCell<S>,
 }
 
+// SAFETY: SpillRing uses interior mutability (Cell/UnsafeCell) for single-threaded
+// access only (!Sync). Sending to another thread is safe when T and S are Send.
 unsafe impl<T: Send, const N: usize, S: Spout<T, Error = core::convert::Infallible> + Send> Send
     for SpillRing<T, N, S>
 {
@@ -60,6 +81,7 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
     ///     .cold()
     ///     .build();
     /// ```
+    #[must_use]
     pub fn builder() -> crate::builder::SpillRingBuilder<T, N> {
         crate::builder::SpillRingBuilder::new()
     }
@@ -87,7 +109,7 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
             head: CellIndex::new(0),
             tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            sink: SpoutCell::new(DropSpout),
+            spout: SpoutCell::new(DropSpout),
         }
     }
 }
@@ -95,15 +117,15 @@ impl<T, const N: usize> SpillRing<T, N, DropSpout> {
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRing<T, N, S> {
     /// Create a new ring buffer with pre-warmed cache and a custom spout.
     #[must_use]
-    pub fn with_sink(sink: S) -> Self {
-        let mut ring = Self::with_sink_cold(sink);
+    pub(crate) fn with_spout(spout: S) -> Self {
+        let mut ring = Self::with_spout_cold(spout);
         ring.warm();
         ring
     }
 
     /// Create a new ring buffer with a custom spout, without cache warming.
     #[must_use]
-    pub fn with_sink_cold(sink: S) -> Self {
+    pub(crate) fn with_spout_cold(spout: S) -> Self {
         const { assert!(N > 0, "capacity must be > 0") };
         const { assert!(N.is_power_of_two(), "capacity must be power of two") };
         const { assert!(N <= MAX_CAPACITY, "capacity exceeds maximum (2^20)") };
@@ -112,16 +134,24 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             head: CellIndex::new(0),
             tail: CellIndex::new(0),
             buffer: [const { Slot::new() }; N],
-            sink: SpoutCell::new(sink),
+            spout: SpoutCell::new(spout),
         }
     }
 
-    /// Bring all ring slots into L1/L2 cache.
+    /// Bring all ring slots into L1/L2 cache by writing zeros to each slot.
+    ///
+    /// This is a performance optimization, not initialization — the slots remain
+    /// logically uninitialized (`MaybeUninit`). The zero-write forces the OS to
+    /// back each page with physical memory and pulls cache lines into L1/L2,
+    /// avoiding page faults and cache misses on the first real `push`.
     fn warm(&mut self) {
         for i in 0..N {
+            // SAFETY: `&mut self` guarantees exclusive access. Writing zeros to
+            // MaybeUninit memory is always valid — this is cache prefetching, not
+            // initialization.
             unsafe {
                 let slot = &mut self.buffer[i];
-                let ptr = slot.data.get_mut() as *mut MaybeUninit<T> as *mut u8;
+                let ptr: *mut u8 = core::ptr::from_mut(slot.data.get_mut()).cast();
                 core::ptr::write_bytes(ptr, 0, core::mem::size_of::<MaybeUninit<T>>());
             }
         }
@@ -139,12 +169,18 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
         if tail.wrapping_sub(head) >= N {
             let evict_idx = head & (N - 1);
+            // SAFETY: Slot at head is initialized (pushed earlier). assume_init_read
+            // moves the value out; head is advanced immediately after.
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store(head.wrapping_add(1));
-            let _ = unsafe { self.sink.get_mut_unchecked().send(evicted) };
+            // SAFETY: SpillRing is !Sync, so &self proves single-context access.
+            // No &mut S alias can exist because that requires &mut self.
+            let _ = unsafe { self.spout.get_mut_unchecked().send(evicted) };
         }
 
         let idx = tail & (N - 1);
+        // SAFETY: Slot at tail is uninitialized (or was previously read out).
+        // write() does not drop the previous value.
         unsafe { (*self.buffer[idx].data.get()).write(item) };
         self.tail.store(tail.wrapping_add(1));
     }
@@ -157,12 +193,14 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
         if tail.wrapping_sub(head) >= N {
             let evict_idx = head & (N - 1);
+            // SAFETY: Slot at head is initialized. assume_init_read moves value out.
             let evicted = unsafe { (*self.buffer[evict_idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(1));
-            let _ = self.sink.get_mut().send(evicted);
+            let _ = self.spout.get_mut().send(evicted);
         }
 
         let idx = tail & (N - 1);
+        // SAFETY: Slot at tail is uninitialized. write() does not drop previous value.
         unsafe { (*self.buffer[idx].data.get()).write(item) };
         self.tail.store_mut(tail.wrapping_add(1));
     }
@@ -179,6 +217,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         }
 
         let idx = head & (N - 1);
+        // SAFETY: Slot at head is initialized (head != tail). assume_init_read moves value out.
         let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
         self.head.store_mut(head.wrapping_add(1));
         Some(item)
@@ -207,13 +246,14 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             let len = tail.wrapping_sub(head);
             if len > 0 {
                 let h = head;
-                let _ = self.sink.get_mut().send_all((0..len).map(|i| unsafe {
+                // SAFETY: Slots [head..tail) are initialized. Each index is consumed once.
+                let _ = self.spout.get_mut().send_all((0..len).map(|i| unsafe {
                     (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
                 }));
             }
             let excess = items.len() - N;
             for &item in &items[..excess] {
-                let _ = self.sink.get_mut().send(item);
+                let _ = self.spout.get_mut().send(item);
             }
             head = head.wrapping_add(len);
             tail = head;
@@ -230,8 +270,9 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         if keep.len() > free {
             let evict_count = keep.len() - free;
             let h = head;
+            // SAFETY: Slots [head..head+evict_count) are initialized. Each consumed once.
             let _ = self
-                .sink
+                .spout
                 .get_mut()
                 .send_all((0..evict_count).map(|i| unsafe {
                     (*self.buffer[(h.wrapping_add(i)) & (N - 1)].data.get()).assume_init_read()
@@ -244,15 +285,19 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         let space_to_end = N - tail_idx;
         let count = keep.len();
 
+        // SAFETY: Destination slots are uninitialized (evicted above or never written).
+        // T: Copy, so memcpy is valid. Slot<T> is #[repr(transparent)] over
+        // UnsafeCell<MaybeUninit<T>>, so data.get() yields a valid *mut T destination.
+        // Source and destination do not overlap (stack slice vs ring buffer).
         unsafe {
-            let dst = self.buffer[tail_idx].data.get() as *mut T;
+            let dst = self.buffer[tail_idx].data.get().cast::<T>();
             if count <= space_to_end {
                 core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, count);
             } else {
                 core::ptr::copy_nonoverlapping(keep.as_ptr(), dst, space_to_end);
                 core::ptr::copy_nonoverlapping(
                     keep.as_ptr().add(space_to_end),
-                    self.buffer[0].data.get() as *mut T,
+                    self.buffer[0].data.get().cast::<T>(),
                     count - space_to_end,
                 );
             }
@@ -293,15 +338,18 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         let head_idx = head & (N - 1);
         let to_end = N - head_idx;
 
+        // SAFETY: Slots [head..head+count) are initialized. T: Copy, so memcpy is
+        // valid. Slot<T> is #[repr(transparent)], so data.get() yields valid *const T.
+        // Source (ring buffer) and destination (caller's buf) do not overlap.
         unsafe {
-            let src = self.buffer[head_idx].data.get() as *const T;
-            let dst = buf.as_mut_ptr() as *mut T;
+            let src: *const T = self.buffer[head_idx].data.get().cast();
+            let dst = buf.as_mut_ptr().cast::<T>();
             if count <= to_end {
                 core::ptr::copy_nonoverlapping(src, dst, count);
             } else {
                 core::ptr::copy_nonoverlapping(src, dst, to_end);
                 core::ptr::copy_nonoverlapping(
-                    self.buffer[0].data.get() as *const T,
+                    self.buffer[0].data.get().cast::<T>(),
                     dst.add(to_end),
                     count - to_end,
                 );
@@ -316,14 +364,18 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     #[inline]
     pub fn push_and_flush(&mut self, item: T) {
         self.push_mut(item);
-        self.flush();
+        let _ = self.flush();
     }
 
     /// Flush all items to spout. Returns count flushed.
     ///
+    /// Items are **consumed** (moved out of the ring), not peeked — after flush
+    /// the ring is empty.
+    ///
     /// Panic-safe: head is advanced after each item is sent, so a panic
     /// in the spout will not cause double-reads during drop.
     #[inline]
+    #[must_use]
     pub fn flush(&mut self) -> usize {
         let head = self.head.load_mut();
         let tail = self.tail.load_mut();
@@ -332,12 +384,15 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
             return 0;
         }
 
-        let sink = self.sink.get_mut();
+        let out = self.spout.get_mut();
         for i in 0..count {
             let idx = head.wrapping_add(i) & (N - 1);
+            // SAFETY: Slot at idx is initialized (head..tail range). assume_init_read
+            // moves the value out; head is advanced immediately after each send for
+            // panic safety.
             let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
             self.head.store_mut(head.wrapping_add(i + 1));
-            let _ = sink.send(item);
+            let _ = out.send(item);
         }
 
         self.tail.store_mut(tail);
@@ -358,6 +413,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
         }
 
         let idx = head & (N - 1);
+        // SAFETY: Slot at head is initialized (head != tail). assume_init_read moves
+        // value out. SpillRing is !Sync, so &self proves single-context access.
         let item = unsafe { (*self.buffer[idx].data.get()).assume_init_read() };
         self.head.store(head.wrapping_add(1));
         Some(item)
@@ -393,35 +450,26 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
 
     /// Clear all items from the buffer, flushing them to the spout.
     pub fn clear(&mut self) {
-        self.flush();
+        let _ = self.flush();
     }
 
     /// Shared reference to the spout.
     ///
-    /// # Safety contract
-    /// Safe to call when no `push`, `flush`, or other mutation is in
-    /// progress — guaranteed by Rust's borrow rules since `&self`
-    /// prevents any concurrent `&mut self` call.
+    /// Uses interior mutability — safe because `SpillRing` is `!Sync`,
+    /// so `&self` proves single-context access.
     #[inline]
     #[must_use]
-    pub fn sink_ref(&self) -> &S {
+    pub fn spout(&self) -> &S {
         // SAFETY: SpillRing is !Sync, so &self proves single-context
         // access.  No &mut S alias can exist because that would
         // require &mut self, which conflicts with this &self borrow.
-        unsafe { self.sink.get_ref() }
-    }
-
-    /// Reference to the spout.
-    #[inline]
-    #[must_use]
-    pub fn sink(&mut self) -> &S {
-        self.sink.get_mut()
+        unsafe { self.spout.get_ref() }
     }
 
     /// Mutable reference to the spout.
     #[inline]
-    pub fn sink_mut(&mut self) -> &mut S {
-        self.sink.get_mut()
+    pub fn spout_mut(&mut self) -> &mut S {
+        self.spout.get_mut()
     }
 
     /// Iterate mutably, oldest to newest.
@@ -438,7 +486,7 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> SpillRin
     }
 }
 
-/// Draining iterator over a SpillRing.
+/// Draining iterator over a `SpillRing`.
 pub struct Drain<'a, T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> {
     ring: &'a mut SpillRing<T, N, S>,
 }
@@ -481,7 +529,7 @@ impl<T, const N: usize> Default for SpillRing<T, N, DropSpout> {
     }
 }
 
-/// SpillRing can act as a Spout, enabling ring chaining (ring1 -> ring2).
+/// `SpillRing` can act as a `Spout`, enabling ring chaining (ring1 -> ring2).
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Spout<T>
     for SpillRing<T, N, S>
 {
@@ -495,17 +543,23 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Spout<T>
 
     #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
-        SpillRing::flush(self);
+        let _ = SpillRing::flush(self);
         Ok(())
     }
 }
 
+/// On drop, flushes all buffered items to the spout, then flushes the spout itself.
+///
+/// When rings are chained (e.g. `ring1 → ring2 → ring3`), each ring's drop
+/// triggers the next ring's `send` + `flush`, producing an O(depth) sequential
+/// cascade. This is bounded by the number of rings the caller constructs and
+/// is not a concern for typical usage (1–3 levels).
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> Drop
     for SpillRing<T, N, S>
 {
     fn drop(&mut self) {
-        self.flush();
-        let _ = self.sink.get_mut().flush();
+        let _ = self.flush();
+        let _ = self.spout.get_mut().flush();
     }
 }
 
@@ -535,6 +589,8 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible>> RingProd
             return Err(crate::PushError::Full(item));
         }
 
+        // SAFETY: Ring is not full (checked above). Slot at tail is uninitialized.
+        // write() does not drop the previous value.
         unsafe {
             let slot = &self.buffer[tail & (N - 1)];
             (*slot.data.get()).write(item);

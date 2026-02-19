@@ -4,31 +4,29 @@ version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-description = "Fast, simple byte serialization for Rust. no_std compatible with zerocopy internals."
+description = "Fast, simple byte serialization for Rust. no_std compatible with little-endian wire format."
 repository = "https://github.com/abmac-io/abmac-lib"
 documentation = "https://docs.rs/bytecast"
 readme = "README.md"
-keywords = ["bytes", "serialization", "zero-copy", "no_std", "embedded"]
+keywords = ["bytes", "serialization", "little-endian", "no_std", "embedded"]
 categories = ["encoding", "no-std", "embedded"]
 
 [dependencies]
-bytecast-macros = { path = "../bytecast-macros", optional = true }
-zerocopy = { version = "0.8", default-features = false }
+abmac-macros = { path = "../abmac-macros", default-features = false, features = ["bytecast"], optional = true }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
 facet = { version = "0.43", default-features = false, features = ["alloc"], optional = true }
 rkyv = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]
-zerocopy = { version = "0.8", features = ["derive"] }
 serde_json = "1"
 facet-json = "0.43"
 rkyv = { version = "0.8", features = ["bytecheck"] }
 
 [features]
-std = ["alloc", "zerocopy/std"]
-alloc = ["zerocopy/alloc"]
-derive = ["dep:bytecast-macros"]
+std = ["alloc"]
+alloc = []
+derive = ["dep:abmac-macros"]
 serde = ["dep:serde", "dep:base64", "alloc"]
 facet = ["dep:facet", "dep:base64", "alloc"]
 rkyv = ["dep:rkyv", "alloc"]
@@ -43,6 +41,7 @@ required-features = ["alloc"]
 
 [[example]]
 name = "custom_struct"
+required-features = ["derive"]
 
 [[example]]
 name = "serde_bridge"

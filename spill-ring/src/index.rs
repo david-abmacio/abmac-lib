@@ -10,8 +10,8 @@ pub(crate) struct SpoutCell<S>(UnsafeCell<S>);
 
 impl<S> SpoutCell<S> {
     #[inline]
-    pub(crate) const fn new(sink: S) -> Self {
-        Self(UnsafeCell::new(sink))
+    pub(crate) const fn new(spout: S) -> Self {
+        Self(UnsafeCell::new(spout))
     }
 
     /// # Safety
@@ -36,6 +36,9 @@ impl<S> SpoutCell<S> {
     }
 }
 
+// SAFETY: SpoutCell wraps UnsafeCell<S>, which is !Sync by default. Send is
+// safe when S: Send because transferring ownership to another thread does not
+// create concurrent access — SpoutCell is only accessed from one thread at a time.
 unsafe impl<S: Send> Send for SpoutCell<S> {}
 
 // CellIndex

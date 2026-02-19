@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "abmac-macros"
+version = "0.1.0"
+dependencies = [
+ "bytecast",
+ "hashbrown",
+ "pebble",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -60,24 +72,13 @@ checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 name = "bytecast"
 version = "1.0.0"
 dependencies = [
+ "abmac-macros",
  "base64",
- "bytecast-macros",
  "facet",
  "facet-json",
  "rkyv",
  "serde",
  "serde_json",
- "zerocopy",
-]
-
-[[package]]
-name = "bytecast-macros"
-version = "1.0.0"
-dependencies = [
- "bytecast",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -406,12 +407,6 @@ checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "foldhash"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
@@ -429,22 +424,13 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash 0.1.5",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
+ "equivalent",
+ "foldhash",
 ]
 
 [[package]]
@@ -455,8 +441,8 @@ checksum = "6b215e67ed1d1a4b1702acd787c487d16e4c977c5dcbcc4587bdb5ea26b6ce06"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash 0.2.0",
- "hashbrown 0.16.1",
+ "foldhash",
+ "hashbrown",
  "rustc-hash",
 ]
 
@@ -473,7 +459,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.1",
+ "hashbrown",
 ]
 
 [[package]]
@@ -574,8 +560,11 @@ dependencies = [
 name = "pebble"
 version = "0.1.0"
 dependencies = [
+ "abmac-macros",
  "bytecast",
- "hashbrown 0.15.5",
+ "hashbrown",
+ "serde",
+ "serde_json",
  "spill-ring",
  "spout",
  "verdict",
@@ -722,7 +711,7 @@ checksum = "1a30e631b7f4a03dee9056b8ef6982e8ba371dd5bedb74d3ec86df4499132c70"
 dependencies = [
  "bytecheck",
  "bytes",
- "hashbrown 0.16.1",
+ "hashbrown",
  "indexmap",
  "munge",
  "ptr_meta",
@@ -834,7 +823,6 @@ name = "spout"
 version = "1.0.0-rc.1"
 dependencies = [
  "bytecast",
- "bytecast-macros",
 ]
 
 [[package]]

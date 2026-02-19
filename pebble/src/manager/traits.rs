@@ -1,6 +1,5 @@
-//! Traits for checkpointable types and serialization.
+//! Traits for checkpointable types.
 
-use alloc::vec::Vec;
 use core::hash::Hash;
 use hashbrown::HashMap;
 
@@ -15,9 +14,6 @@ pub trait Checkpointable: Sized + Clone {
     /// Get the checkpoint's unique identifier.
     fn checkpoint_id(&self) -> Self::Id;
 
-    /// Get IDs of checkpoints this one depends on.
-    fn dependencies(&self) -> &[Self::Id];
-
     /// Rebuild this checkpoint from its dependencies.
     ///
     /// Called during state rebuild when a checkpoint is loaded from storage.
@@ -26,16 +22,4 @@ pub trait Checkpointable: Sized + Clone {
         base: Self,
         deps: &HashMap<Self::Id, &Self>,
     ) -> core::result::Result<Self, Self::RebuildError>;
-}
-
-/// Serialize and deserialize checkpoints.
-pub trait CheckpointSerializer<T> {
-    /// Error type for serialization failures.
-    type Error: core::fmt::Debug + core::fmt::Display;
-
-    /// Serialize a checkpoint to bytes.
-    fn serialize(&self, value: &T) -> core::result::Result<Vec<u8>, Self::Error>;
-
-    /// Deserialize a checkpoint from bytes.
-    fn deserialize(&self, bytes: &[u8]) -> core::result::Result<T, Self::Error>;
 }

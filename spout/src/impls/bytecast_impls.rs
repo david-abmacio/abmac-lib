@@ -4,7 +4,7 @@ use bytecast::{ByteCursor, ByteReader, BytesError, FromBytes, ToBytes};
 
 use crate::Spout;
 
-/// Prepends framing headers (producer_id, byte length, payload) before forwarding.
+/// Prepends framing headers (`producer_id`, byte length, payload) before forwarding.
 ///
 /// Each item is serialized via `ToBytes`, then wrapped in a frame:
 /// `[producer_id: usize] [payload_len: u32 (4 bytes)] [payload bytes]`
@@ -13,6 +13,8 @@ use crate::Spout;
 /// are portable across architectures.
 ///
 /// Compose with `ProducerSpout` for tagged, framed output.
+#[must_use]
+#[derive(Debug)]
 pub struct FramedSpout<S> {
     inner: S,
     producer_id: usize,
@@ -23,7 +25,7 @@ pub struct FramedSpout<S> {
 /// Fixed overhead per frame: serialized usize (always 8 bytes via bytecast) + u32 payload length.
 const FRAME_HEADER_SIZE: usize = match (<usize as ToBytes>::MAX_SIZE, <u32 as ToBytes>::MAX_SIZE) {
     (Some(a), Some(b)) => a + b,
-    _ => unreachable!(),
+    _ => panic!("usize and u32 must have known MAX_SIZE"),
 };
 
 impl<S> FramedSpout<S> {
@@ -60,8 +62,30 @@ impl<S> FramedSpout<S> {
     }
 }
 
-impl<T: ToBytes, S: Spout<Vec<u8>, Error = core::convert::Infallible>> Spout<T> for FramedSpout<S> {
-    type Error = BytesError;
+/// Error from a [`FramedSpout`].
+///
+/// Wraps either a serialization error or the inner spout's send error.
+#[derive(Debug)]
+pub enum FramedSpoutError<E> {
+    /// Serialization or framing failed.
+    Encode(BytesError),
+    /// The inner spout returned an error.
+    Send(E),
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for FramedSpoutError<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Encode(e) => write!(f, "encode: {e}"),
+            Self::Send(e) => write!(f, "send: {e}"),
+        }
+    }
+}
+
+impl<E: core::fmt::Debug + core::fmt::Display> core::error::Error for FramedSpoutError<E> {}
+
+impl<T: ToBytes, S: Spout<Vec<u8>>> Spout<T> for FramedSpout<S> {
+    type Error = FramedSpoutError<S::Error>;
 
     #[inline]
     fn send(&mut self, item: T) -> Result<(), Self::Error> {
@@ -72,33 +96,46 @@ impl<T: ToBytes, S: Spout<Vec<u8>, Error = core::convert::Infallible>> Spout<T> 
         self.buf.clear();
         self.buf.resize(FRAME_HEADER_SIZE + payload_size, 0);
 
-        // Write payload first to learn actual size
-        let payload_written = item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])?;
+        // Write payload, retrying once on undersized buffer
+        let payload_written = match item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..]) {
+            Ok(n) => n,
+            Err(BytesError::BufferTooSmall { .. }) => {
+                let exact = item.byte_len().unwrap_or(self.buf.len() * 2);
+                self.buf.resize(FRAME_HEADER_SIZE + exact, 0);
+                item.to_bytes(&mut self.buf[FRAME_HEADER_SIZE..])
+                    .map_err(FramedSpoutError::Encode)?
+            }
+            Err(e) => return Err(FramedSpoutError::Encode(e)),
+        };
 
         // Validate payload fits in u32 length field
-        let payload_len =
-            u32::try_from(payload_written).map_err(|_| BytesError::BufferTooSmall {
+        let payload_len = u32::try_from(payload_written).map_err(|_| {
+            FramedSpoutError::Encode(BytesError::BufferTooSmall {
                 needed: payload_written,
                 available: u32::MAX as usize,
-            })?;
+            })
+        })?;
 
         // Write header: producer_id + payload length
         let mut cursor = ByteCursor::new(&mut self.buf[..FRAME_HEADER_SIZE]);
-        cursor.write(&self.producer_id)?;
-        cursor.write(&payload_len)?;
+        cursor
+            .write(&self.producer_id)
+            .map_err(FramedSpoutError::Encode)?;
+        cursor
+            .write(&payload_len)
+            .map_err(FramedSpoutError::Encode)?;
 
-        // Truncate to actual frame size and reuse buffer
+        // Truncate to actual frame size and send, preserving buffer capacity
         let total = FRAME_HEADER_SIZE + payload_written;
         self.buf.truncate(total);
-        // Inner spout is infallible
-        let _ = self.inner.send(self.buf.split_off(0));
-        Ok(())
+        let capacity = self.buf.capacity();
+        let frame = core::mem::replace(&mut self.buf, Vec::with_capacity(capacity));
+        self.inner.send(frame).map_err(FramedSpoutError::Send)
     }
 
     #[inline]
     fn flush(&mut self) -> Result<(), Self::Error> {
-        let _ = self.inner.flush();
-        Ok(())
+        self.inner.flush().map_err(FramedSpoutError::Send)
     }
 }
 
@@ -106,18 +143,27 @@ impl<T: ToBytes, S: Spout<Vec<u8>, Error = core::convert::Infallible>> Spout<T> 
 ///
 /// Returns `(producer_id, item)` from the framed bytes. Validates that the
 /// declared payload length matches the remaining frame bytes.
+///
+/// # Errors
+/// Returns an error if the frame is malformed or the payload cannot be decoded.
 pub fn decode_frame<T: FromBytes>(frame: &[u8]) -> Result<(usize, T), BytesError> {
     let mut reader = ByteReader::new(frame);
     let producer_id: usize = reader.read()?;
-    let payload_len: u32 = reader.read()?;
+    let payload_len: usize = reader.read::<u32>()? as usize;
     let remaining = reader.remaining();
-    if remaining.len() != payload_len as usize {
+    if remaining.len() != payload_len {
         return Err(BytesError::UnexpectedEof {
-            needed: payload_len as usize,
+            needed: payload_len,
             available: remaining.len(),
         });
     }
     let item: T = reader.read()?;
+    let trailing = reader.remaining().len();
+    if trailing != 0 {
+        return Err(BytesError::InvalidData {
+            message: "trailing bytes after payload in frame",
+        });
+    }
     Ok((producer_id, item))
 }
 
@@ -146,9 +192,23 @@ impl<T: ToBytes, S> ToBytes for BatchSpout<T, S> {
 /// Returns `(threshold, buffered_items)` from the bytes produced by
 /// `BatchSpout::to_bytes()`. The caller reconstructs the `BatchSpout`
 /// with their own sink and uses these values to restore state.
+///
+/// # Errors
+/// Returns an error if the bytes are malformed or items cannot be decoded.
 pub fn decode_batch<T: FromBytes>(bytes: &[u8]) -> Result<(usize, Vec<T>), BytesError> {
     let mut reader = ByteReader::new(bytes);
     let threshold: usize = reader.read()?;
+    if threshold == 0 {
+        return Err(BytesError::InvalidData {
+            message: "batch threshold must be at least 1",
+        });
+    }
     let buffer: Vec<T> = reader.read()?;
+    let trailing = reader.remaining().len();
+    if trailing != 0 {
+        return Err(BytesError::InvalidData {
+            message: "trailing bytes after batch payload",
+        });
+    }
     Ok((threshold, buffer))
 }

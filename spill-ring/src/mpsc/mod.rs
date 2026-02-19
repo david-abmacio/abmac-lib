@@ -2,7 +2,7 @@
 //!
 //! Each producer owns an independent [`SpillRing`] running at full speed (~4.6 Gelem/s).
 //! No shared state, no locks, no contention on the hot path.
-//! Items automatically flush to the configured sink on overflow and when dropped.
+//! Items automatically flush to the configured spout on overflow and when dropped.
 //!
 //! # Example
 //!
@@ -12,8 +12,8 @@
 //! use std::thread;
 //!
 //! // Each producer gets its own CollectSpout via ProducerSpout factory
-//! let sink = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
-//! let producers = MpscRing::<u64, 1024, _>::with_sink(4, sink);
+//! let spout = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
+//! let producers = MpscRing::<u64, 1024, _>::with_spout(4, spout);
 //!
 //! // Each producer runs at full speed on its own thread
 //! thread::scope(|s| {
@@ -27,21 +27,51 @@
 //!     }
 //! });
 //! ```
+//!
+//! # Backpressure
+//!
+//! The TPC [`WorkerPool`] provides structural backpressure without explicit
+//! flow control protocols. When the consumer is slow, pressure propagates
+//! backward through the system automatically:
+//!
+//! 1. **Consumer slow** — [`collect()`](WorkerPool::collect) called less frequently
+//! 2. **Handoff slots fill** — published batches sit uncollected
+//! 3. **Workers detect** — next publish finds a non-null batch pointer
+//! 4. **Merge back** — worker merges uncollected batch into its active ring
+//! 5. **Ring fills** — accumulated items exceed ring capacity
+//! 6. **Overflow fires** — evicted items route to the overflow spout
+//!
+//! Each layer has a natural valve. The overflow spout is the pressure
+//! relief — configurable per ring (drop, collect, spill to disk).
+//! No tokens, no credits, no explicit flow control. The ring's finite
+//! capacity and the handoff slot's single-entry design create backpressure
+//! structurally.
+//!
+//! # Multi-Stage Pipelines
+//!
+//! Stages compose through the spout trait — each pool's output feeds the
+//! next stage's input via [`collect()`](WorkerPool::collect):
+//!
+//! ```text
+//! WorkerPool<Stage1> → collect() → WorkerPool<Stage2> → collect() → sink
+//! ```
+//!
+//! Each stage independently scales to its core allocation. The compiler
+//! monomorphizes the entire chain — zero dynamic dispatch. No `Pipeline`
+//! struct, no `Stage` trait, no runtime graph. The types compose, the
+//! user builds the graph, the compiler inlines.
 
 extern crate alloc;
 
 mod consumer;
 mod producer;
+#[cfg(feature = "std")]
+mod tpc;
 
-#[cfg(feature = "std")]
-pub(crate) mod barrier;
-#[cfg(feature = "std")]
-mod pool;
-
-pub use consumer::{Consumer, collect};
-#[cfg(feature = "std")]
-pub use pool::{PoolBuilder, WorkerPool};
+pub use consumer::Consumer;
 pub use producer::Producer;
+#[cfg(feature = "std")]
+pub use tpc::*;
 
 use alloc::vec::Vec;
 use spout::{DropSpout, Spout};
@@ -60,13 +90,17 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     /// Each producer owns its own ring running at full speed.
     /// Items are dropped on overflow and when the producer is dropped.
     ///
+    /// # Panics
+    ///
+    /// Panics if `num_producers` is 0.
+    ///
     /// # Example
     ///
     /// ```
     /// use spill_ring::MpscRing;
     /// use std::thread;
     ///
-    /// let producers = MpscRing::<u64, 256>::new(4);
+    /// let producers = MpscRing::<u64, 256>::producers(4);
     ///
     /// thread::scope(|s| {
     ///     for (id, producer) in producers.into_iter().enumerate() {
@@ -79,20 +113,25 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     ///     }
     /// });
     /// ```
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(num_producers: usize) -> Vec<Producer<T, N>> {
+    #[must_use]
+    pub fn producers(num_producers: usize) -> Vec<Producer<T, N>> {
+        assert!(num_producers > 0, "must have at least one producer");
         (0..num_producers).map(|_| Producer::new()).collect()
     }
 
     /// Create producers with a consumer for manual draining.
     ///
     /// Use this when you need to collect items after producers finish,
-    /// rather than auto-flushing to a sink.
+    /// rather than auto-flushing to a spout.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_producers` is 0.
     ///
     /// # Example
     ///
     /// ```
-    /// use spill_ring::{MpscRing, collect};
+    /// use spill_ring::MpscRing;
     /// use spout::CollectSpout;
     /// use std::thread;
     ///
@@ -112,12 +151,14 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     ///     .collect()
     /// });
     ///
-    /// collect(finished, &mut consumer);
+    /// consumer.collect(finished);
     ///
-    /// let mut sink = CollectSpout::new();
-    /// consumer.drain(&mut sink);
+    /// let mut spout = CollectSpout::new();
+    /// consumer.drain(&mut spout);
     /// ```
+    #[must_use]
     pub fn with_consumer(num_producers: usize) -> (Vec<Producer<T, N>>, Consumer<T, N>) {
+        assert!(num_producers > 0, "must have at least one producer");
         let producers = (0..num_producers).map(|_| Producer::new()).collect();
         (producers, Consumer::new())
     }
@@ -143,6 +184,7 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
     /// pool.run(&10_000);
     /// let consumer = pool.into_consumer();
     /// ```
+    #[must_use]
     #[cfg(feature = "std")]
     pub fn pool(num_workers: usize) -> PoolBuilder<T, N, DropSpout>
     where
@@ -153,10 +195,14 @@ impl<T, const N: usize> MpscRing<T, N, DropSpout> {
 }
 
 impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible> + Clone> MpscRing<T, N, S> {
-    /// Create producers with a shared sink for handling evictions.
+    /// Create producers with a shared spout for handling evictions.
     ///
-    /// Each producer gets a clone of the sink. Items overflow to the sink
+    /// Each producer gets a clone of the spout. Items overflow to the spout
     /// during pushes and remaining items flush on drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `num_producers` is 0.
     ///
     /// # Example
     ///
@@ -165,32 +211,34 @@ impl<T, const N: usize, S: Spout<T, Error = core::convert::Infallible> + Clone> 
     /// use spout::{CollectSpout, ProducerSpout};
     ///
     /// // Each producer gets its own CollectSpout
-    /// let sink = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
-    /// let producers = MpscRing::<u64, 64, _>::with_sink(4, sink);
+    /// let spout = ProducerSpout::new(|_id| CollectSpout::<u64>::new());
+    /// let producers = MpscRing::<u64, 64, _>::with_spout(4, spout);
     ///
     /// for producer in producers {
     ///     producer.push(42);
     ///     // Items flush to spout on drop
     /// }
     /// ```
-    pub fn with_sink(num_producers: usize, sink: S) -> Vec<Producer<T, N, S>> {
+    #[allow(clippy::needless_pass_by_value)] // spout is cloned per-producer, consumed by move
+    pub fn with_spout(num_producers: usize, spout: S) -> Vec<Producer<T, N, S>> {
+        assert!(num_producers > 0, "must have at least one producer");
         (0..num_producers)
-            .map(|_| Producer::with_sink(sink.clone()))
+            .map(|_| Producer::with_spout(spout.clone()))
             .collect()
     }
 
-    /// Create a pool builder with a custom sink for persistent worker threads.
+    /// Create a pool builder with a custom spout for persistent worker threads.
     ///
     /// This is the recommended API for maximum performance. Each thread owns
-    /// its own pre-warmed ring with a clone of the sink. Call
+    /// its own pre-warmed ring with a clone of the spout. Call
     /// [`spawn()`](PoolBuilder::spawn) to provide the work function and start
     /// the pool.
     #[cfg(feature = "std")]
-    pub fn pool_with_sink(num_workers: usize, sink: S) -> PoolBuilder<T, N, S>
+    pub fn pool_with_spout(num_workers: usize, spout: S) -> PoolBuilder<T, N, S>
     where
         T: Send + 'static,
         S: Send + 'static,
     {
-        PoolBuilder::with_sink(num_workers, sink)
+        PoolBuilder::with_spout(num_workers, spout)
     }
 }

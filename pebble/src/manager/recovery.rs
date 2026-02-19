@@ -1,45 +1,37 @@
 //! Recovery from existing storage.
 
 use alloc::vec::Vec;
-use hashbrown::{HashMap, HashSet};
+
+use core::convert::Infallible;
+
+use spout::Spout;
 
 use super::cold::RecoverableColdTier;
-use super::error::Result;
+use super::manifest::{Manifest, ManifestEntry};
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
-use crate::dag::ComputationDAG;
+use crate::errors::manager::Result;
 use crate::storage::{IntegrityError, IntegrityErrorKind, RecoveryMode, RecoveryResult};
 use crate::strategy::Strategy;
 
-impl<T, C, W> PebbleManager<T, C, W>
+impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
     T: Checkpointable,
-    T::Id: Ord,
     C: RecoverableColdTier<T>,
     W: WarmTier<T>,
+    S: Spout<ManifestEntry<T::Id>, Error = Infallible>,
 {
     /// Recover state from existing storage.
-    pub fn recover(
+    pub(crate) fn recover(
         cold: C,
         warm: W,
+        manifest: Manifest<T::Id, S>,
         strategy: Strategy,
         hot_capacity: usize,
+        auto_resize: bool,
     ) -> Result<(Self, RecoveryResult), T::Id, C::Error> {
-        let mut manager = Self {
-            hot_capacity,
-            red_pebbles: HashMap::new(),
-            blue_pebbles: HashSet::new(),
-            dag: ComputationDAG::new(),
-            strategy,
-            cold,
-            warm,
-            checkpoints_added: 0,
-            io_operations: 0,
-            branches: None,
-            #[cfg(debug_assertions)]
-            game: crate::game::PebbleGame::new(hot_capacity),
-        };
+        let mut manager = Self::new(cold, warm, manifest, strategy, hot_capacity, auto_resize);
 
         // Collect all checkpoint metadata
         let mut checkpoints: Vec<_> = manager.cold.iter_metadata().collect();
@@ -58,22 +50,55 @@ where
             ));
         }
 
-        // Sort by timestamp to ensure dependencies are processed first
-        checkpoints.sort_by_key(|(_, meta)| meta.creation_timestamp);
-
+        // Process checkpoints in dependency order. A checkpoint can
+        // only be loaded once all its dependencies have been loaded.
+        // Iterate in rounds: each round processes checkpoints whose
+        // deps are satisfied. Stop when no progress is made — any
+        // remaining items have genuinely missing dependencies.
         let mut integrity_errors = Vec::new();
         let mut checkpoints_loaded = 0;
         let mut dag_nodes_rebuilt = 0;
         let mut latest_state_id: Option<T::Id> = None;
 
-        for (state_id, metadata) in checkpoints {
-            match manager.recover_checkpoint(state_id, &metadata) {
-                Ok(()) => {
-                    checkpoints_loaded += 1;
-                    dag_nodes_rebuilt += 1;
-                    latest_state_id = Some(state_id);
+        // Sort by timestamp as a tiebreaker within each round so
+        // the "latest" checkpoint is deterministic.
+        checkpoints.sort_by_key(|(_, meta)| meta.creation_timestamp);
+
+        let mut remaining = checkpoints;
+        loop {
+            let before = remaining.len();
+            let mut deferred = Vec::new();
+
+            for (state_id, metadata) in remaining {
+                match manager.recover_checkpoint(state_id, &metadata) {
+                    Ok(()) => {
+                        checkpoints_loaded += 1;
+                        dag_nodes_rebuilt += 1;
+                        latest_state_id = Some(state_id);
+                    }
+                    Err(_) => {
+                        // Defer — deps may appear in a later round.
+                        deferred.push((state_id, metadata));
+                    }
                 }
-                Err(err) => integrity_errors.push(err),
+            }
+
+            remaining = deferred;
+
+            // No progress — remaining items have genuinely missing deps.
+            if remaining.len() == before {
+                break;
+            }
+            // All done.
+            if remaining.is_empty() {
+                break;
+            }
+        }
+
+        // Any items still remaining have unresolvable dependency errors.
+        for (state_id, metadata) in &remaining {
+            if let Err(err) = manager.recover_checkpoint(*state_id, metadata) {
+                integrity_errors.push(err);
             }
         }
 
@@ -160,7 +185,7 @@ where
 
             self.red_pebbles.insert(state_id, checkpoint);
             self.blue_pebbles.remove(&state_id);
-            self.io_operations = self.io_operations.saturating_add(1);
+            self.io_reads = self.io_reads.saturating_add(1);
 
             #[cfg(debug_assertions)]
             self.game.move_to_red(state_id);

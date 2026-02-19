@@ -127,11 +127,13 @@ fn main() {
                 msg = Some(format!("Loaded #{id} = {loaded_val} from cold to hot"));
             }
             Action::Save { id, deps } => {
-                mgr.add(Checkpoint {
-                    id: *id,
-                    value: val,
-                    deps: deps.to_vec(),
-                })
+                mgr.add(
+                    Checkpoint {
+                        id: *id,
+                        value: val,
+                    },
+                    deps,
+                )
                 .unwrap();
                 values.insert(*id, val);
                 let branch_name = mgr

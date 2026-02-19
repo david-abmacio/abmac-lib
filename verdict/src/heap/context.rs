@@ -79,6 +79,10 @@ pub struct Context<
 
 impl<E: Actionable> Context<E, Dynamic, DropSpout> {
     /// Create a new contextualized error with unbounded frames.
+    ///
+    /// When the `std` feature is enabled, a backtrace is captured automatically.
+    /// Capture is controlled by the `RUST_BACKTRACE` environment variable and
+    /// is a no-op when unset — there is no per-call opt-out.
     #[must_use]
     pub fn new(error: E) -> Self {
         Self {
@@ -119,6 +123,10 @@ impl<E: Actionable> Context<E, Dynamic, spout::CollectSpout<Frame>> {
     /// When more than `max_frames` are added, the oldest frames are moved to
     /// an internal collection accessible via [`into_overflow`](Context::into_overflow).
     /// A `max_frames` of 0 is clamped to 1.
+    ///
+    /// **Note:** The overflow collection is unbounded — total memory usage is
+    /// not reduced, only the active frame window is limited. For true memory
+    /// bounding, use [`Context::bounded`] which drops evicted frames.
     #[must_use]
     pub fn bounded_collect(error: E, max_frames: usize) -> Self {
         let max_frames = max_frames.max(1);
@@ -247,7 +255,7 @@ impl<E, S: Status, Overflow: Spout<Frame, Error = core::convert::Infallible>>
             // Evict oldest frame to overflow
             if let Some(evicted) = self.frames.pop_front() {
                 let _ = self.overflow.send(evicted);
-                self.overflow_count += 1;
+                self.overflow_count = self.overflow_count.saturating_add(1);
             }
         }
         self.frames.push_back(frame);
@@ -287,9 +295,8 @@ impl<E, S: Status, Overflow: Spout<Frame, Error = core::convert::Infallible>>
     #[track_caller]
     pub fn assert_origin(self, module_prefix: &str) -> Self {
         debug_assert!(
-            self.frames.iter().any(|f| f.file.contains(module_prefix)),
-            "missing provenance: expected frame from '{}'",
-            module_prefix
+            self.frames.iter().any(|f| f.file().contains(module_prefix)),
+            "missing provenance: expected frame from '{module_prefix}'"
         );
         self
     }
@@ -479,6 +486,8 @@ impl<
     }
 }
 
+/// Always returns `Context<E, Dynamic>` — the on-wire status is discarded.
+/// Use [`decode_context`] to restore the original status typestate.
 #[cfg(feature = "bytecast")]
 impl<E: bytecast::FromBytes + Actionable> bytecast::FromBytes for Context<E, Dynamic, DropSpout> {
     fn from_bytes(buf: &[u8]) -> Result<(Self, usize), bytecast::BytesError> {
@@ -491,6 +500,7 @@ impl<E: bytecast::FromBytes + Actionable> bytecast::FromBytes for Context<E, Dyn
         offset += n;
         let (max_frames, n) = usize::from_bytes(&buf[offset..])?;
         offset += n;
+        let max_frames = max_frames.max(1);
         let (overflow_count, n) = usize::from_bytes(&buf[offset..])?;
         offset += n;
 
@@ -530,6 +540,11 @@ pub enum DecodedContext<E> {
 /// Unlike `FromBytes for Context<E, Dynamic, DropSpout>` which always returns
 /// `Dynamic`, this function restores the status typestate that was present
 /// when the context was serialized.
+///
+/// # Errors
+///
+/// Returns [`bytecast::BytesError`] if the buffer is too short or contains
+/// invalid data.
 #[cfg(feature = "bytecast")]
 pub fn decode_context<E: bytecast::FromBytes + Actionable>(
     buf: &[u8],
@@ -545,6 +560,7 @@ pub fn decode_context<E: bytecast::FromBytes + Actionable>(
     offset += n;
     let (max_frames, n) = usize::from_bytes(&buf[offset..])?;
     offset += n;
+    let max_frames = max_frames.max(1);
     let (overflow_count, n) = usize::from_bytes(&buf[offset..])?;
     offset += n;
 

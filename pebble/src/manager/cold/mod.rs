@@ -1,19 +1,33 @@
 //! Cold-tier storage trait and implementations.
 
 mod direct;
-#[cfg(feature = "cold-buffer-std")]
+#[cfg(feature = "std")]
 mod parallel;
-#[cfg(feature = "cold-buffer")]
 mod ring;
 
+use core::hash::Hash;
+
 use super::traits::Checkpointable;
-use crate::storage::{CheckpointMetadata, SessionId};
+use crate::storage::{CheckpointMetadata, RecoverableStorage, SessionId};
 
 pub use direct::{DirectStorage, DirectStorageError};
-#[cfg(feature = "cold-buffer-std")]
+#[cfg(feature = "std")]
 pub use parallel::ParallelCold;
-#[cfg(feature = "cold-buffer")]
 pub use ring::RingCold;
+
+/// Debug-only cold tier type alias.
+///
+/// Resolves to file-backed storage (with `std`) or in-memory
+/// storage (without). Does not exist in release builds.
+#[cfg(all(debug_assertions, feature = "std"))]
+pub type DebugCold = DirectStorage<crate::storage::DebugFileStorage>;
+
+/// Debug-only cold tier type alias.
+///
+/// Falls back to in-memory storage when `std` is not available.
+/// Does not exist in release builds.
+#[cfg(all(debug_assertions, not(feature = "std")))]
+pub type DebugCold = DirectStorage<crate::storage::InMemoryStorage>;
 
 /// Cold-side storage abstraction.
 ///
@@ -23,14 +37,14 @@ pub use ring::RingCold;
 ///
 /// Three implementations:
 /// - [`DirectStorage`] — serialize and send immediately, no buffering (always available)
-/// - [`RingCold`] — serialize into a SpillRing (requires `cold-buffer`)
-/// - [`ParallelCold`] — serialize across a WorkerPool (requires `cold-buffer-std`)
+/// - [`RingCold`] — serialize into a SpillRing (always available)
+/// - [`ParallelCold`] — parallel I/O across a WorkerPool (requires `std`)
 pub trait ColdTier<T: Checkpointable> {
     /// Error type for storage operations.
     type Error: core::fmt::Debug + core::fmt::Display;
 
-    /// Serialize and store a checkpoint.
-    fn store(&mut self, id: T::Id, checkpoint: &T) -> Result<(), Self::Error>;
+    /// Serialize and store a checkpoint with its dependency list.
+    fn store(&mut self, id: T::Id, checkpoint: &T, deps: &[T::Id]) -> Result<(), Self::Error>;
 
     /// Load and deserialize a checkpoint from storage.
     ///
@@ -48,6 +62,9 @@ pub trait ColdTier<T: Checkpointable> {
     /// Flush all buffered items to storage, making them visible to
     /// [`load`](Self::load) and [`contains`](Self::contains).
     fn flush(&mut self) -> Result<(), Self::Error>;
+
+    /// Remove a checkpoint from storage. Returns `true` if it existed.
+    fn remove(&mut self, id: T::Id) -> Result<bool, Self::Error>;
 
     /// Number of items currently buffered (not yet in storage).
     fn buffered_count(&self) -> usize;
@@ -72,4 +89,31 @@ pub trait RecoverableColdTier<T: Checkpointable, SId: SessionId = u128, const MA
 
     /// Get metadata for a specific checkpoint.
     fn get_metadata(&self, id: T::Id) -> Option<CheckpointMetadata<T::Id, SId, MAX_DEPS>>;
+}
+
+/// Iterator adapter that delegates to a storage backend's metadata iterator.
+///
+/// Shared by all `RecoverableColdTier` implementations — each wraps
+/// `S::MetadataIter` in this type to satisfy the associated type.
+pub struct ColdMetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
+where
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug + 'a,
+    S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
+    SId: SessionId + 'a,
+{
+    pub(crate) inner: S::MetadataIter<'a>,
+}
+
+impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator
+    for ColdMetadataIter<'a, CId, S, SId, MAX_DEPS>
+where
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug,
+    S: RecoverableStorage<CId, SId, MAX_DEPS>,
+    SId: SessionId,
+{
+    type Item = (CId, CheckpointMetadata<CId, SId, MAX_DEPS>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
 }

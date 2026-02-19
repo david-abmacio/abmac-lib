@@ -39,19 +39,19 @@ fn push_and_pop() {
 fn eviction_to_sink() {
     // N=4 main buffer, items evicted directly to sink
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+    let ring = SpillRing::<i32, 4, _>::builder().spout(sink).build();
 
     ring.push(1);
     ring.push(2);
     ring.push(3);
     ring.push(4);
-    assert!(ring.sink().items().is_empty()); // Nothing evicted yet
+    assert!(ring.spout().items().is_empty()); // Nothing evicted yet
 
-    ring.push(5); // Evicts 1 directly to sink
-    assert_eq!(ring.sink().items(), vec![1]);
+    ring.push(5); // Evicts 1 to spout
+    assert_eq!(ring.spout().items(), vec![1]);
 
-    ring.push(6); // Evicts 2 directly to sink
-    assert_eq!(ring.sink().items(), vec![1, 2]);
+    ring.push(6); // Evicts 2 to spout
+    assert_eq!(ring.spout().items(), vec![1, 2]);
 
     // Ring now contains [3, 4, 5, 6]
     assert_eq!(ring.pop(), Some(3));
@@ -62,7 +62,7 @@ fn eviction_to_sink() {
 
 #[test]
 fn peek_oldest_and_newest() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     assert_eq!(ring.peek(), None);
     assert_eq!(ring.peek_back(), None);
@@ -79,7 +79,7 @@ fn peek_oldest_and_newest() {
 
 #[test]
 fn iteration() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     ring.push(1);
     ring.push(2);
@@ -97,7 +97,7 @@ fn iter_mut() {
     ring.push(2);
     ring.push(3);
 
-    for item in ring.iter_mut() {
+    for item in &mut ring {
         *item *= 10;
     }
 
@@ -108,16 +108,16 @@ fn iter_mut() {
 #[test]
 fn flush_clears_buffer() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<i32, 4, _>::builder().spout(sink).build();
 
     ring.push(1);
     ring.push(2);
     ring.push(3);
 
-    ring.flush();
+    let _ = ring.flush();
 
     assert!(ring.is_empty());
-    assert_eq!(ring.sink().items(), vec![1, 2, 3]);
+    assert_eq!(ring.spout().items(), vec![1, 2, 3]);
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn wraparound() {
 
 #[test]
 fn get_by_index() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     ring.push(10);
     ring.push(20);
@@ -151,33 +151,35 @@ fn get_by_index() {
 }
 
 #[test]
-fn drop_flushes_to_sink() {
+fn drop_flushes_to_spout() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static SINK_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static SPOUT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-    struct CountingSink;
-    impl spout::Spout<i32> for CountingSink {
+    struct CountingSpout;
+    impl spout::Spout<i32> for CountingSpout {
         type Error = core::convert::Infallible;
 
         fn send(&mut self, _item: i32) -> Result<(), Self::Error> {
-            SINK_COUNT.fetch_add(1, Ordering::SeqCst);
+            SPOUT_COUNT.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
 
-    SINK_COUNT.store(0, Ordering::SeqCst);
+    SPOUT_COUNT.store(0, Ordering::SeqCst);
 
     {
-        let ring = SpillRing::<i32, 4, _>::with_sink(CountingSink);
+        let ring = SpillRing::<i32, 4, _>::builder()
+            .spout(CountingSpout)
+            .build();
         ring.push(1);
         ring.push(2);
         ring.push(3);
-        // 3 items in ring, none sent to sink yet
-        assert_eq!(SINK_COUNT.load(Ordering::SeqCst), 0);
+        // 3 items in ring, none sent to spout yet
+        assert_eq!(SPOUT_COUNT.load(Ordering::SeqCst), 0);
     }
-    // Ring dropped, all 3 items should be flushed to sink
-    assert_eq!(SINK_COUNT.load(Ordering::SeqCst), 3);
+    // Ring dropped, all 3 items should be flushed to spout
+    assert_eq!(SPOUT_COUNT.load(Ordering::SeqCst), 3);
 }
 
 #[test]
@@ -210,22 +212,22 @@ fn drop_with_default_sink_drops_items() {
 #[test]
 fn push_and_flush() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<i32, 4, _>::builder().spout(sink).build();
 
     ring.push_and_flush(1);
     assert!(ring.is_empty());
-    assert_eq!(ring.sink().items(), vec![1]);
+    assert_eq!(ring.spout().items(), vec![1]);
 
     ring.push(2);
     ring.push(3);
     ring.push_and_flush(4);
     assert!(ring.is_empty());
-    assert_eq!(ring.sink().items(), vec![1, 2, 3, 4]);
+    assert_eq!(ring.spout().items(), vec![1, 2, 3, 4]);
 }
 
 #[test]
 fn iter_nth() {
-    let ring: SpillRing<i32, 8> = SpillRing::new();
+    let mut ring: SpillRing<i32, 8> = SpillRing::new();
     ring.push(10);
     ring.push(20);
     ring.push(30);
@@ -318,10 +320,10 @@ fn push_slice_exact_capacity() {
 #[test]
 fn push_slice_partial_eviction() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<u32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<u32, 4, _>::builder().spout(sink).build();
     ring.push_slice(&[1, 2, 3]); // 3 items, 1 free
     ring.push_slice(&[4, 5, 6]); // needs 3, only 1 free → evict 2
-    assert_eq!(ring.sink().items(), vec![1, 2]);
+    assert_eq!(ring.spout().items(), vec![1, 2]);
     assert_eq!(ring.len(), 4);
     assert_eq!(ring.pop_mut(), Some(3));
     assert_eq!(ring.pop_mut(), Some(4));
@@ -332,13 +334,13 @@ fn push_slice_partial_eviction() {
 #[test]
 fn push_slice_exceeds_capacity() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<u32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<u32, 4, _>::builder().spout(sink).build();
     ring.push_mut(100); // pre-fill with 1 item
     ring.push_slice(&[1, 2, 3, 4, 5, 6, 7, 8]); // 8 items into cap-4 ring
     // Ring had [100], slice is 8 items (> N=4).
     // Phase 1: evict ring contents [100], send excess [1,2,3,4] to spout.
     // Phase 2: keep=[5,6,7,8] fills ring exactly.
-    assert_eq!(ring.sink().items(), vec![100, 1, 2, 3, 4]);
+    assert_eq!(ring.spout().items(), vec![100, 1, 2, 3, 4]);
     assert_eq!(ring.len(), 4);
     assert_eq!(ring.pop_mut(), Some(5));
     assert_eq!(ring.pop_mut(), Some(6));
@@ -367,7 +369,7 @@ fn push_slice_wraparound() {
 #[test]
 fn push_slice_wraparound_with_eviction() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<u32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<u32, 4, _>::builder().spout(sink).build();
     // Fill 3 items, pop 2 → head=2, tail=3, len=1 at slot[2]
     ring.push_slice(&[0, 0, 99]);
     let _ = ring.pop_mut(); // 0
@@ -375,7 +377,7 @@ fn push_slice_wraparound_with_eviction() {
     // tail_idx=3, 1 item in ring (99 at slot[2]), 3 free
     // Push 4 items: needs 4, free=3, evict 1 (the 99)
     ring.push_slice(&[10, 20, 30, 40]);
-    assert_eq!(ring.sink().items(), vec![99]);
+    assert_eq!(ring.spout().items(), vec![99]);
     assert_eq!(ring.len(), 4);
     // Items wrap: slot[3]=10, slot[0]=20, slot[1]=30, slot[2]=40
     assert_eq!(ring.pop_mut(), Some(10));
@@ -476,16 +478,16 @@ fn spill_ring_builder_cold() {
 }
 
 #[test]
-fn spill_ring_builder_with_sink() {
+fn spill_ring_builder_with_spout() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<u64, 4>::builder().sink(sink).build();
+    let ring = SpillRing::<u64, 4>::builder().spout(sink).build();
     // Overflow to trigger spout
     for i in 0..8 {
         ring.push(i);
     }
     assert_eq!(ring.len(), 4);
-    // First 4 items evicted to sink, last 4 remain in ring
-    assert_eq!(ring.sink().items(), vec![0, 1, 2, 3]);
+    // First 4 items evicted to spout, last 4 remain in ring
+    assert_eq!(ring.spout().items(), vec![0, 1, 2, 3]);
     assert_eq!(ring.pop(), Some(4));
     assert_eq!(ring.pop(), Some(5));
     assert_eq!(ring.pop(), Some(6));
@@ -493,9 +495,9 @@ fn spill_ring_builder_with_sink() {
 }
 
 #[test]
-fn spill_ring_builder_cold_with_sink() {
+fn spill_ring_builder_cold_with_spout() {
     let sink = CollectSpout::new();
-    let ring = SpillRing::<u64, 4>::builder().sink(sink).cold().build();
+    let ring = SpillRing::<u64, 4>::builder().spout(sink).cold().build();
     ring.push(1);
     assert_eq!(ring.pop(), Some(1));
 }
@@ -505,14 +507,14 @@ fn spill_ring_builder_cold_with_sink() {
 #[test]
 fn push_mut_with_eviction() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<i32, 4, _>::builder().spout(sink).build();
 
     for i in 0..6 {
         ring.push_mut(i);
     }
 
     // First 2 evicted to sink, last 4 in ring
-    assert_eq!(ring.sink().items(), vec![0, 1]);
+    assert_eq!(ring.spout().items(), vec![0, 1]);
     assert_eq!(ring.pop_mut(), Some(2));
     assert_eq!(ring.pop_mut(), Some(3));
     assert_eq!(ring.pop_mut(), Some(4));
@@ -547,7 +549,7 @@ fn pop_mut_empty_and_wraparound() {
 
 #[test]
 fn peek_back_after_wraparound() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     // Fill and overflow to wrap around
     for i in 0..6 {
@@ -560,7 +562,7 @@ fn peek_back_after_wraparound() {
 
 #[test]
 fn get_after_wraparound() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     // Fill and overflow: ring contains [4, 5, 6, 7]
     for i in 0..8 {
@@ -574,15 +576,15 @@ fn get_after_wraparound() {
 }
 
 #[test]
-fn with_sink_cold_eviction() {
+fn with_spout_cold_eviction() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink_cold(sink);
+    let ring = SpillRing::<i32, 4, _>::builder().spout(sink).cold().build();
 
     for i in 0..8 {
         ring.push(i);
     }
     // Cold-constructed ring should handle eviction correctly
-    assert_eq!(ring.sink().items(), vec![0, 1, 2, 3]);
+    assert_eq!(ring.spout().items(), vec![0, 1, 2, 3]);
     assert_eq!(ring.len(), 4);
     assert_eq!(ring.pop(), Some(4));
     assert_eq!(ring.pop(), Some(5));
@@ -625,7 +627,7 @@ fn drain_size_hint() {
 
 #[test]
 fn fused_iterator_behavior() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
     ring.push(1);
 
     let mut iter = ring.iter();
@@ -646,7 +648,7 @@ fn iter_mut_after_wraparound() {
     }
     // Ring contains [2, 3, 4, 5] with wrapped indices
 
-    for item in ring.iter_mut() {
+    for item in &mut ring {
         *item *= 10;
     }
 
@@ -656,13 +658,13 @@ fn iter_mut_after_wraparound() {
 
 #[test]
 fn into_iter_ref() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
     ring.push(1);
     ring.push(2);
     ring.push(3);
 
-    let items: Vec<&i32> = (&ring).into_iter().collect();
-    assert_eq!(items, vec![&1, &2, &3]);
+    let items: Vec<i32> = ring.iter().copied().collect();
+    assert_eq!(items, vec![1, 2, 3]);
 }
 
 #[test]
@@ -683,11 +685,11 @@ fn into_iter_mut_ref() {
 #[test]
 fn extend_overflow_to_sink() {
     let sink = CollectSpout::new();
-    let mut ring = SpillRing::<i32, 4, _>::with_sink(sink);
+    let mut ring = SpillRing::<i32, 4, _>::builder().spout(sink).build();
     ring.extend(0..10);
 
     // First 6 evicted to sink, last 4 in ring
-    assert_eq!(ring.sink().items(), vec![0, 1, 2, 3, 4, 5]);
+    assert_eq!(ring.spout().items(), vec![0, 1, 2, 3, 4, 5]);
     assert_eq!(ring.len(), 4);
     assert_eq!(ring.pop(), Some(6));
 }

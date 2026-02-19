@@ -1,0 +1,7 @@
+# Deny by default
+allow-unwrap-in-tests = true
+avoid-breaking-exported-api = true
+
+# Custom settings
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250

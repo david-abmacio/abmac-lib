@@ -1,9 +1,9 @@
 [package]
 name = "pebble"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
 description = "O(√T) checkpoint management using the Williams pebble game algorithm"
-license = "MIT OR Apache-2.0"
 
 [features]
 default = ["cold-buffer"]

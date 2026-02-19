@@ -1,11 +1,11 @@
 [package]
 name = "spill-ring"
 version = "1.0.0-rc.2"
-edition = "2024"
-rust-version = "1.85"
-license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Core no_std ring buffer with overflow-to-spout semantics"
-repository = "https://github.com/abmac-io/abmac-lib"
 documentation = "https://docs.rs/spill-ring"
 readme = "README.md"
 keywords = ["ring-buffer", "no_std", "embedded", "lock-free", "spout"]

@@ -52,5 +52,5 @@ name = "facet_json"
 required-features = ["std", "facet"]
 
 [dev-dependencies]
-serde_json = "1"
-facet-json = "0.43"
+serde_json = "1.0.149"
+facet-json = "0.43.2"

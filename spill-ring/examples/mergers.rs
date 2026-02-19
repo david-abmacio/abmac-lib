@@ -6,8 +6,7 @@
 //!
 //! Run with: cargo run --example mergers --features std
 
-use spill_ring::{MpscRing, UnorderedCollector};
-use spout::CollectSpout;
+use spill_ring::MpscRing;
 use std::thread;
 
 fn main() {
@@ -24,9 +23,8 @@ fn main() {
 
     // Each merger gets its own CollectSpout via the factory.
     // Merger 0 drains workers {0, 2, 4, 6}, merger 1 drains {1, 3, 5, 7}.
-    let totals = pool.with_mergers(
+    let totals = pool.with_mergers_collect(
         NUM_MERGERS,
-        |_| UnorderedCollector::new(CollectSpout::new()),
         |mergers| {
             thread::scope(|s| {
                 let handles: Vec<_> = mergers

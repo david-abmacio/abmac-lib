@@ -5,8 +5,7 @@
 //!
 //! Run with: cargo run --example sequenced --features std
 
-use spill_ring::{MpscRing, SequencedCollector};
-use spout::CollectSpout;
+use spill_ring::MpscRing;
 
 fn main() {
     const NUM_WORKERS: usize = 4;
@@ -17,7 +16,7 @@ fn main() {
     });
 
     // streaming_fan_in returns a guard — no unsafe needed.
-    let mut stream = pool.streaming_fan_in(SequencedCollector::from_spout(CollectSpout::new()));
+    let mut stream = pool.streaming_fan_in_collect_sequenced();
 
     for round in 0..ROUNDS {
         stream.dispatch(&round);

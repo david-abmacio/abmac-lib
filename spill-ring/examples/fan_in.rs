@@ -6,8 +6,7 @@
 //!
 //! Run with: cargo run --example fan_in --features std
 
-use spill_ring::{MpscRing, UnorderedCollector};
-use spout::CollectSpout;
+use spill_ring::MpscRing;
 
 fn main() {
     const NUM_WORKERS: usize = 4;
@@ -21,7 +20,7 @@ fn main() {
     pool.run(&100);
 
     // with_fan_in: scoped access to a FanInSpout that drains all slots.
-    let count = pool.with_fan_in(UnorderedCollector::new(CollectSpout::new()), |fan_in| {
+    let count = pool.with_fan_in_collect(|fan_in| {
         fan_in.flush().unwrap();
         fan_in.collector().inner().items().len()
     });

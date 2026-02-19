@@ -65,34 +65,13 @@ extern crate alloc;
 
 mod consumer;
 mod producer;
+#[cfg(feature = "std")]
+mod tpc;
 
-#[cfg(feature = "std")]
-mod collector;
-#[cfg(feature = "std")]
-mod fan_in;
-#[cfg(feature = "std")]
-mod handoff;
-#[cfg(feature = "std")]
-mod merger;
-#[cfg(feature = "std")]
-mod pool;
-#[cfg(feature = "std")]
-mod streaming;
-#[cfg(feature = "std")]
-mod sync;
-
-#[cfg(feature = "std")]
-pub use collector::{Collector, SequencedCollector, UnorderedCollector};
 pub use consumer::Consumer;
-#[cfg(feature = "std")]
-pub use fan_in::FanInSpout;
-#[cfg(feature = "std")]
-pub use merger::MergerHandle;
-#[cfg(feature = "std")]
-pub use pool::{PoolBuilder, WorkerPanic, WorkerPool};
 pub use producer::Producer;
 #[cfg(feature = "std")]
-pub use streaming::{StreamingFanIn, StreamingMergers};
+pub use tpc::*;
 
 use alloc::vec::Vec;
 use spout::{DropSpout, Spout};

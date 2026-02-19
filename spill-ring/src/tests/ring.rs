@@ -62,7 +62,7 @@ fn eviction_to_sink() {
 
 #[test]
 fn peek_oldest_and_newest() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     assert_eq!(ring.peek(), None);
     assert_eq!(ring.peek_back(), None);
@@ -79,7 +79,7 @@ fn peek_oldest_and_newest() {
 
 #[test]
 fn iteration() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     ring.push(1);
     ring.push(2);
@@ -138,7 +138,7 @@ fn wraparound() {
 
 #[test]
 fn get_by_index() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     ring.push(10);
     ring.push(20);
@@ -169,7 +169,9 @@ fn drop_flushes_to_spout() {
     SPOUT_COUNT.store(0, Ordering::SeqCst);
 
     {
-        let ring = SpillRing::<i32, 4, _>::builder().spout(CountingSpout).build();
+        let ring = SpillRing::<i32, 4, _>::builder()
+            .spout(CountingSpout)
+            .build();
         ring.push(1);
         ring.push(2);
         ring.push(3);
@@ -225,7 +227,7 @@ fn push_and_flush() {
 
 #[test]
 fn iter_nth() {
-    let ring: SpillRing<i32, 8> = SpillRing::new();
+    let mut ring: SpillRing<i32, 8> = SpillRing::new();
     ring.push(10);
     ring.push(20);
     ring.push(30);
@@ -547,7 +549,7 @@ fn pop_mut_empty_and_wraparound() {
 
 #[test]
 fn peek_back_after_wraparound() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     // Fill and overflow to wrap around
     for i in 0..6 {
@@ -560,7 +562,7 @@ fn peek_back_after_wraparound() {
 
 #[test]
 fn get_after_wraparound() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
 
     // Fill and overflow: ring contains [4, 5, 6, 7]
     for i in 0..8 {
@@ -625,7 +627,7 @@ fn drain_size_hint() {
 
 #[test]
 fn fused_iterator_behavior() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
     ring.push(1);
 
     let mut iter = ring.iter();
@@ -656,13 +658,13 @@ fn iter_mut_after_wraparound() {
 
 #[test]
 fn into_iter_ref() {
-    let ring: SpillRing<i32, 4> = SpillRing::new();
+    let mut ring: SpillRing<i32, 4> = SpillRing::new();
     ring.push(1);
     ring.push(2);
     ring.push(3);
 
-    let items: Vec<&i32> = (&ring).into_iter().collect();
-    assert_eq!(items, vec![&1, &2, &3]);
+    let items: Vec<i32> = ring.iter().copied().collect();
+    assert_eq!(items, vec![1, 2, 3]);
 }
 
 #[test]

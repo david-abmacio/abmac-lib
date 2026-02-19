@@ -163,10 +163,12 @@ where
     }
 }
 
-// SAFETY: FanInSpout is Send when C is Send. The slot pointers are
-// SendPtr (manually Send). The validity invariant is maintained by
-// the scoped API or the unsafe constructor's contract.
-unsafe impl<T, const N: usize, S, C> Send for FanInSpout<T, N, S, C>
+// SAFETY: FanInSpout is Send when T and C are Send. flush() drains T items
+// from handoff slots and delivers them to the collector, moving T values
+// across thread boundaries. The slot pointers are SendPtr (manually Send).
+// The validity invariant is maintained by the scoped API or the unsafe
+// constructor's contract.
+unsafe impl<T: Send, const N: usize, S, C> Send for FanInSpout<T, N, S, C>
 where
     S: Spout<T, Error = core::convert::Infallible>,
     C: Collector<T> + Send,

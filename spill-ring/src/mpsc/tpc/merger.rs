@@ -79,9 +79,9 @@ where
 }
 
 // SAFETY: MergerHandle is Send when FanInSpout is Send (which requires
-// C: Send). The raw pointer validity invariant is maintained by the
-// scoped API or the unsafe constructor's contract.
-unsafe impl<T, const N: usize, S, C> Send for MergerHandle<T, N, S, C>
+// T: Send and C: Send). The raw pointer validity invariant is maintained
+// by the scoped API or the unsafe constructor's contract.
+unsafe impl<T: Send, const N: usize, S, C> Send for MergerHandle<T, N, S, C>
 where
     S: Spout<T, Error = core::convert::Infallible>,
     C: Collector<T> + Send,

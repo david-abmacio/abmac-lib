@@ -61,8 +61,17 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: cargo-audit
+      
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+      
       - name: Run security audit
-        uses: actions-rust-lang/audit@v1
+        run: cargo audit
 
   deny:
     name: Dependency Check

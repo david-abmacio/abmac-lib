@@ -20,9 +20,16 @@ facet = ["bytecast", "bytecast/facet", "dep:facet"]
 
 [dependencies]
 spout = { version = "1.0.0-rc.1", path = "../spout", default-features = false, optional = true }
-bytecast = { path = "../bytecast", default-features = false, features = ["derive", "alloc"], optional = true }
-serde = { version = "1", default-features = false, features = ["derive"], optional = true }
-facet = { version = "0.43", default-features = false, features = ["alloc"], optional = true }
+bytecast = { path = "../bytecast", default-features = false, features = [
+  "derive",
+  "alloc",
+], optional = true }
+serde = { version = "1.0.228", default-features = false, features = [
+  "derive",
+], optional = true }
+facet = { version = "0.43.2", default-features = false, features = [
+  "alloc",
+], optional = true }
 
 [[example]]
 name = "basic"

@@ -10,14 +10,14 @@ description = "ABMAC derive macros: ToBytes, FromBytes, Checkpoint"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2.0", features = ["full", "parsing"] }
-quote = "1.0"
-proc-macro2 = "1.0"
+syn = { version = "2.0.116", features = ["full", "parsing"] }
+quote = "1.0.44"
+proc-macro2 = "1.0.106"
 
 [dev-dependencies]
 bytecast = { path = "../bytecast", features = ["derive", "alloc"] }
 pebble = { path = "../pebble", features = ["derive"] }
-hashbrown = "0.16"
+hashbrown = "0.16.1"
 
 [features]
 default = []

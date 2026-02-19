@@ -23,27 +23,24 @@ fn main() {
 
     // Each merger gets its own CollectSpout via the factory.
     // Merger 0 drains workers {0, 2, 4, 6}, merger 1 drains {1, 3, 5, 7}.
-    let totals = pool.with_mergers_collect(
-        NUM_MERGERS,
-        |mergers| {
-            thread::scope(|s| {
-                let handles: Vec<_> = mergers
-                    .iter_mut()
-                    .map(|m| {
-                        s.spawn(|| {
-                            m.flush().unwrap();
-                            (m.merger_id(), m.collector().inner().items().len())
-                        })
+    let totals = pool.with_mergers_collect(NUM_MERGERS, |mergers| {
+        thread::scope(|s| {
+            let handles: Vec<_> = mergers
+                .iter_mut()
+                .map(|m| {
+                    s.spawn(|| {
+                        m.flush().unwrap();
+                        (m.merger_id(), m.collector().inner().items().len())
                     })
-                    .collect();
+                })
+                .collect();
 
-                handles
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect::<Vec<_>>()
-            })
-        },
-    );
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        })
+    });
 
     let grand_total: usize = totals.iter().map(|(_, count)| count).sum();
     for (id, count) in &totals {

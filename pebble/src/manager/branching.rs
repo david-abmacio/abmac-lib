@@ -8,11 +8,11 @@ use spout::Spout;
 
 use super::branch::{BranchError, BranchId, BranchInfo, BranchTracker, HEAD};
 use super::cold::ColdTier;
-use super::error::PebbleManagerError;
 use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::PebbleManagerError;
 
 impl<T, C, W, S> PebbleManager<T, C, W, S>
 where
@@ -63,7 +63,7 @@ where
         &mut self,
         checkpoint_id: T::Id,
         name: &str,
-    ) -> super::error::Result<BranchId, T::Id, C::Error> {
+    ) -> crate::errors::manager::Result<BranchId, T::Id, C::Error> {
         let tracker =
             self.branches
                 .as_mut()

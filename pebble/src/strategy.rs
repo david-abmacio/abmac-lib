@@ -149,24 +149,19 @@ pub enum DAGPriorityMode {
 #[derive(Debug, Clone)]
 pub struct DAGStrategy {
     pub priority_mode: DAGPriorityMode,
-    pub batch_processing: bool,
 }
 
 impl Default for DAGStrategy {
     fn default() -> Self {
         Self {
             priority_mode: DAGPriorityMode::Hybrid,
-            batch_processing: true,
         }
     }
 }
 
 impl DAGStrategy {
     pub fn new(priority_mode: DAGPriorityMode) -> Self {
-        Self {
-            priority_mode,
-            batch_processing: true,
-        }
+        Self { priority_mode }
     }
 
     pub fn select_eviction_candidates<T, V>(
@@ -197,9 +192,10 @@ impl DAGStrategy {
                 DAGPriorityMode::FewestDependents => {
                     (n.dependents.len(), n.access_frequency as usize)
                 }
-                DAGPriorityMode::LowestComputationCost | DAGPriorityMode::Hybrid => {
+                DAGPriorityMode::LowestComputationCost => {
                     (n.computation_cost, n.access_frequency as usize)
                 }
+                DAGPriorityMode::Hybrid => (n.dependents.len(), n.computation_cost),
             };
             (cp, a, b)
         });

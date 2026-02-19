@@ -7,11 +7,11 @@ use core::convert::Infallible;
 use spout::Spout;
 
 use super::cold::RecoverableColdTier;
-use super::error::Result;
 use super::manifest::{Manifest, ManifestEntry};
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::Result;
 use crate::storage::{IntegrityError, IntegrityErrorKind, RecoveryMode, RecoveryResult};
 use crate::strategy::Strategy;
 

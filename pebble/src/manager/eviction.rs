@@ -8,11 +8,11 @@ use core::convert::Infallible;
 use spout::Spout;
 
 use super::cold::ColdTier;
-use super::error::{PebbleManagerError, Result};
 use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::{PebbleManagerError, Result};
 
 /// Fraction of hot capacity to evict/promote at a time (1/4).
 pub(super) const EVICTION_BATCH_DIVISOR: usize = 4;

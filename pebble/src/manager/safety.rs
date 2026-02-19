@@ -8,11 +8,11 @@ use core::convert::Infallible;
 use spout::Spout;
 
 use super::cold::ColdTier;
-use super::error::Result;
 use super::manifest::ManifestEntry;
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::Result;
 
 /// Proof that a checkpoint existed in the manager at creation time.
 ///

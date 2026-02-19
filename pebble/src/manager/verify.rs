@@ -42,6 +42,10 @@ where
     /// entry. Any node in none of those was lost.
     ///
     /// Also checks for sequence gaps in the manifest entries.
+    ///
+    /// **Important:** Call [`flush()`](Self::flush) before verifying.
+    /// Entries buffered in the manifest ring have not yet drained to the
+    /// spout, so verification without flushing may report false losses.
     pub fn verify<I>(&self, manifest_entries: I) -> VerificationResult<T::Id>
     where
         I: IntoIterator<Item = ManifestEntry<T::Id>>,

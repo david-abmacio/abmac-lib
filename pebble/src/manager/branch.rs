@@ -83,6 +83,10 @@ impl<T: Copy + Eq + core::hash::Hash> BranchTracker<T> {
         }
         let id = BranchId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
+        debug_assert!(
+            !self.branches.contains_key(&id),
+            "branch ID {id:?} collision after wrap-around"
+        );
         self.branches.insert(
             id,
             BranchInfo {

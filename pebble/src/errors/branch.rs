@@ -14,9 +14,6 @@ verdict::display_error! {
         #[display("branch {id:?} not found")]
         BranchNotFound { id: BranchId },
 
-        #[display("fork-point checkpoint not found")]
-        CheckpointNotFound,
-
         #[display("branch name already used: {name}")]
         NameAlreadyUsed { name: String },
     }

@@ -7,7 +7,6 @@ mod branch;
 mod branching;
 mod builder;
 pub mod cold;
-mod error;
 mod eviction;
 mod manifest;
 mod pebble_manager;
@@ -19,6 +18,7 @@ mod traits;
 mod verify;
 pub mod warm;
 
+pub use crate::errors::manager::{ErasedPebbleManagerError, PebbleManagerError, Result};
 pub use branch::{BranchError, BranchId, BranchInfo, HEAD};
 pub use builder::{Missing, PebbleBuilder};
 #[cfg(debug_assertions)]
@@ -27,7 +27,6 @@ pub use cold::DebugCold;
 pub use cold::ParallelCold;
 pub use cold::RingCold;
 pub use cold::{ColdTier, DirectStorage, DirectStorageError, RecoverableColdTier};
-pub use error::{ErasedPebbleManagerError, PebbleManagerError, Result};
 pub use manifest::{Manifest, ManifestEntry};
 pub use pebble_manager::PebbleManager;
 pub use safety::{CapacityGuard, CheckpointRef};

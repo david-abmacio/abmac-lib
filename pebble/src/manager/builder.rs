@@ -219,7 +219,7 @@ impl<C, W, L> PebbleBuilder<C, W, L> {
     #[allow(clippy::type_complexity)]
     pub fn recover<T>(
         self,
-    ) -> super::error::Result<
+    ) -> crate::errors::manager::Result<
         (PebbleManager<T, C, W, L>, crate::storage::RecoveryResult),
         T::Id,
         C::Error,

@@ -50,17 +50,6 @@ impl PebbleRules {
         red_pebbles.contains(&node)
     }
 
-    pub fn can_compute<T: Copy + Eq + Hash>(
-        node: T,
-        dependencies: &[T],
-        red_pebbles: &HashSet<T>,
-        max_red_pebbles: usize,
-    ) -> bool {
-        let deps_ok = dependencies.iter().all(|dep| red_pebbles.contains(dep));
-        let space_ok = red_pebbles.contains(&node) || red_pebbles.len() < max_red_pebbles;
-        deps_ok && space_ok
-    }
-
     pub fn can_delete<T: Copy + Eq + Hash>(node: T, red_pebbles: &HashSet<T>) -> bool {
         red_pebbles.contains(&node)
     }

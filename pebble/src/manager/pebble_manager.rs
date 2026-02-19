@@ -11,12 +11,12 @@ use core::convert::Infallible;
 use spout::Spout;
 
 use super::cold::ColdTier;
-use super::error::{PebbleManagerError, Result};
 use super::manifest::{Manifest, ManifestEntry};
 use super::safety::{CapacityGuard, CheckpointRef};
 use super::stats::{PebbleStats, TheoreticalValidation};
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
+use crate::errors::manager::{PebbleManagerError, Result};
 
 /// Space bound safety multiplier: hot_capacity <= sqrt(T) * this value.
 pub(super) const SPACE_BOUND_MULTIPLIER: usize = 2;
@@ -418,11 +418,8 @@ where
         // Edge bound (Hong & Kung 1981): (|E| - |V|*S) / S.
         let v = dag_stats.total_nodes;
         let e = dag_stats.edge_count;
-        let edge = if e > v * s {
-            (e - v * s).div_ceil(s)
-        } else {
-            0
-        };
+        let vs = v.saturating_mul(s);
+        let edge = if e > vs { (e - vs).div_ceil(s) } else { 0 };
 
         // Depth bound: critical path exceeding hot capacity.
         let depth = (dag_stats.max_depth + 1).saturating_sub(s);
@@ -657,6 +654,9 @@ where
         // Phase 1: purge tombstoned items from cold storage.
         let tombstoned: Vec<T::Id> = self.tombstoned.drain().collect();
         for id in &tombstoned {
+            // Best-effort: the tombstone is already in the manifest, so
+            // recovery will skip this ID even if the physical remove fails.
+            // Stale data may linger in cold storage but won't corrupt state.
             let _ = self.cold.remove(*id);
             purged += 1;
         }
@@ -703,6 +703,7 @@ where
             // has the old copy. Tombstone and purge unconditionally.
             if self.cold.contains(id) {
                 self.manifest.record_tombstone(id);
+                // Best-effort: see Phase 1 comment above.
                 let _ = self.cold.remove(id);
                 purged += 1;
             }

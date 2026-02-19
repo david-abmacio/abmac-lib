@@ -6,7 +6,7 @@
 
 extern crate std;
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -28,7 +28,7 @@ use super::{CheckpointLoader, CheckpointRemover, StorageError};
 #[derive(Debug)]
 pub struct DebugFileStorage {
     dir: PathBuf,
-    written: HashMap<u64, ()>,
+    written: HashSet<u64>,
 }
 
 impl DebugFileStorage {
@@ -45,13 +45,13 @@ impl DebugFileStorage {
         fs::create_dir_all(dir).expect("create debug storage dir");
 
         // Discover existing files so `contains` works across restarts.
-        let mut written = HashMap::new();
+        let mut written = HashSet::new();
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 if let Some(stem) = entry.path().file_stem()
                     && let Some(id) = stem.to_str().and_then(|s| s.parse::<u64>().ok())
                 {
-                    written.insert(id, ());
+                    written.insert(id);
                 }
             }
         }
@@ -84,7 +84,7 @@ impl Spout<(u64, Vec<u8>, Vec<u64>)> for DebugFileStorage {
     fn send(&mut self, (id, bytes, _deps): (u64, Vec<u8>, Vec<u64>)) -> Result<(), Self::Error> {
         let path = self.path_for(id);
         fs::write(&path, &bytes).expect("write debug checkpoint file");
-        self.written.insert(id, ());
+        self.written.insert(id);
         Ok(())
     }
 }
@@ -96,13 +96,13 @@ impl CheckpointLoader<u64> for DebugFileStorage {
     }
 
     fn contains(&self, state_id: u64) -> bool {
-        self.written.contains_key(&state_id)
+        self.written.contains(&state_id)
     }
 }
 
 impl CheckpointRemover<u64> for DebugFileStorage {
     fn remove(&mut self, state_id: u64) -> bool {
-        if self.written.remove(&state_id).is_none() {
+        if !self.written.remove(&state_id) {
             return false;
         }
         let _ = fs::remove_file(self.path_for(state_id));

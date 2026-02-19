@@ -109,7 +109,8 @@ impl<CId: Copy + Eq + Hash + Default + core::fmt::Debug, SId: SessionId, const M
 
     /// Get dependencies as a slice.
     pub fn dependencies(&self) -> &[CId] {
-        &self.dependencies[..self.dep_count as usize]
+        let count = (self.dep_count as usize).min(MAX_DEPS);
+        &self.dependencies[..count]
     }
 
     /// Maximum dependencies this metadata can hold.

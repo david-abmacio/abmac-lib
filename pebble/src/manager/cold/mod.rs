@@ -5,8 +5,10 @@ mod direct;
 mod parallel;
 mod ring;
 
+use core::hash::Hash;
+
 use super::traits::Checkpointable;
-use crate::storage::{CheckpointMetadata, SessionId};
+use crate::storage::{CheckpointMetadata, RecoverableStorage, SessionId};
 
 pub use direct::{DirectStorage, DirectStorageError};
 #[cfg(feature = "std")]
@@ -87,4 +89,31 @@ pub trait RecoverableColdTier<T: Checkpointable, SId: SessionId = u128, const MA
 
     /// Get metadata for a specific checkpoint.
     fn get_metadata(&self, id: T::Id) -> Option<CheckpointMetadata<T::Id, SId, MAX_DEPS>>;
+}
+
+/// Iterator adapter that delegates to a storage backend's metadata iterator.
+///
+/// Shared by all `RecoverableColdTier` implementations — each wraps
+/// `S::MetadataIter` in this type to satisfy the associated type.
+pub struct ColdMetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
+where
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug + 'a,
+    S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
+    SId: SessionId + 'a,
+{
+    pub(crate) inner: S::MetadataIter<'a>,
+}
+
+impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator
+    for ColdMetadataIter<'a, CId, S, SId, MAX_DEPS>
+where
+    CId: Copy + Eq + Hash + Default + core::fmt::Debug,
+    S: RecoverableStorage<CId, SId, MAX_DEPS>,
+    SId: SessionId,
+{
+    type Item = (CId, CheckpointMetadata<CId, SId, MAX_DEPS>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
 }

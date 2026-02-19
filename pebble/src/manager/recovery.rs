@@ -1,7 +1,6 @@
 //! Recovery from existing storage.
 
 use alloc::vec::Vec;
-use hashbrown::{HashMap, HashSet};
 
 use core::convert::Infallible;
 
@@ -13,7 +12,6 @@ use super::manifest::{Manifest, ManifestEntry};
 use super::pebble_manager::PebbleManager;
 use super::traits::Checkpointable;
 use super::warm::WarmTier;
-use crate::dag::ComputationDAG;
 use crate::storage::{IntegrityError, IntegrityErrorKind, RecoveryMode, RecoveryResult};
 use crate::strategy::Strategy;
 
@@ -33,27 +31,7 @@ where
         hot_capacity: usize,
         auto_resize: bool,
     ) -> Result<(Self, RecoveryResult), T::Id, C::Error> {
-        let mut manager = Self {
-            hot_capacity,
-            red_pebbles: HashMap::new(),
-            blue_pebbles: HashSet::new(),
-            dag: ComputationDAG::new(),
-            strategy,
-            cold,
-            warm,
-            manifest,
-            checkpoints_added: 0,
-            io_reads: 0,
-            io_writes: 0,
-            warm_hits: 0,
-            cold_loads: 0,
-            auto_resize,
-            dirty: HashSet::new(),
-            tombstoned: HashSet::new(),
-            branches: None,
-            #[cfg(debug_assertions)]
-            game: crate::game::PebbleGame::new(hot_capacity),
-        };
+        let mut manager = Self::new(cold, warm, manifest, strategy, hot_capacity, auto_resize);
 
         // Collect all checkpoint metadata
         let mut checkpoints: Vec<_> = manager.cold.iter_metadata().collect();

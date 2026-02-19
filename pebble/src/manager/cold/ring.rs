@@ -17,7 +17,7 @@ use crate::storage::{
 use bytecast::ByteSerializer;
 
 pub use super::direct::DirectStorageError;
-use super::{ColdTier, RecoverableColdTier};
+use super::{ColdMetadataIter, ColdTier, RecoverableColdTier};
 
 /// SpillRing-backed cold tier.
 ///
@@ -117,43 +117,19 @@ where
     SId: SessionId,
 {
     type MetadataIter<'a>
-        = RingMetadataIter<'a, T::Id, S, SId, MAX_DEPS>
+        = ColdMetadataIter<'a, T::Id, S, SId, MAX_DEPS>
     where
         Self: 'a,
         T::Id: 'a,
         SId: 'a;
 
     fn iter_metadata(&self) -> Self::MetadataIter<'_> {
-        RingMetadataIter {
+        ColdMetadataIter {
             inner: self.ring.spout().iter_metadata(),
         }
     }
 
     fn get_metadata(&self, id: T::Id) -> Option<CheckpointMetadata<T::Id, SId, MAX_DEPS>> {
         self.ring.spout().get_metadata(id)
-    }
-}
-
-/// Iterator adapter for [`RingCold::iter_metadata`].
-pub struct RingMetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
-where
-    CId: Copy + Eq + Hash + Default + core::fmt::Debug + 'a,
-    S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
-    SId: SessionId + 'a,
-{
-    inner: S::MetadataIter<'a>,
-}
-
-impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator
-    for RingMetadataIter<'a, CId, S, SId, MAX_DEPS>
-where
-    CId: Copy + Eq + Hash + Default + core::fmt::Debug,
-    S: RecoverableStorage<CId, SId, MAX_DEPS>,
-    SId: SessionId,
-{
-    type Item = (CId, CheckpointMetadata<CId, SId, MAX_DEPS>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
     }
 }

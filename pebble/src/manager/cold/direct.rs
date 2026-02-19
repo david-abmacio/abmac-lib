@@ -1,7 +1,6 @@
 //! Direct (unbuffered) cold tier implementation.
 
 use alloc::vec::Vec;
-use core::fmt;
 use core::hash::Hash;
 
 use spout::Spout;
@@ -13,7 +12,7 @@ use crate::storage::{
 };
 use bytecast::ByteSerializer;
 
-use super::{ColdTier, RecoverableColdTier};
+use super::{ColdMetadataIter, ColdTier, RecoverableColdTier};
 
 /// Unbuffered cold tier: serialize and send immediately.
 ///
@@ -122,42 +121,19 @@ where
     SId: SessionId,
 {
     type MetadataIter<'a>
-        = MetadataIter<'a, T::Id, S, SId, MAX_DEPS>
+        = ColdMetadataIter<'a, T::Id, S, SId, MAX_DEPS>
     where
         Self: 'a,
         T::Id: 'a,
         SId: 'a;
 
     fn iter_metadata(&self) -> Self::MetadataIter<'_> {
-        MetadataIter {
+        ColdMetadataIter {
             inner: self.storage.iter_metadata(),
         }
     }
 
     fn get_metadata(&self, id: T::Id) -> Option<CheckpointMetadata<T::Id, SId, MAX_DEPS>> {
         self.storage.get_metadata(id)
-    }
-}
-
-/// Iterator adapter for [`DirectStorage::iter_metadata`].
-pub struct MetadataIter<'a, CId, S, SId, const MAX_DEPS: usize>
-where
-    CId: Copy + Eq + Hash + Default + fmt::Debug + 'a,
-    S: RecoverableStorage<CId, SId, MAX_DEPS> + 'a,
-    SId: SessionId + 'a,
-{
-    inner: S::MetadataIter<'a>,
-}
-
-impl<'a, CId, S, SId, const MAX_DEPS: usize> Iterator for MetadataIter<'a, CId, S, SId, MAX_DEPS>
-where
-    CId: Copy + Eq + Hash + Default + fmt::Debug,
-    S: RecoverableStorage<CId, SId, MAX_DEPS>,
-    SId: SessionId,
-{
-    type Item = (CId, CheckpointMetadata<CId, SId, MAX_DEPS>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
     }
 }

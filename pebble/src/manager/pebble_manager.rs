@@ -697,7 +697,11 @@ where
                 tracker.remove_checkpoint(id);
             }
 
-            if was_in_cold {
+            // Any tier may have a stale cold copy: load() promotes from
+            // cold to hot (removing blue_pebbles) but leaves the data in
+            // cold storage. A subsequent eviction to warm means cold still
+            // has the old copy. Tombstone and purge unconditionally.
+            if self.cold.contains(id) {
                 self.manifest.record_tombstone(id);
                 let _ = self.cold.remove(id);
                 purged += 1;

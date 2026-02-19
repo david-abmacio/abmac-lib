@@ -3,6 +3,10 @@ resolver = "3"
 members = ["abmac-macros", "bytecast", "spout", "spill-ring", "verdict", "pebble"]
 
 [workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/abmac-io/abmac-lib"
 
 [workspace.dependencies]
 spout = { path = "./spout" }

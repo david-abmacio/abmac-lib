@@ -1,9 +1,9 @@
 [package]
 name = "pebble"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
 description = "O(√T) checkpoint management using the Williams pebble game algorithm"
-license = "MIT OR Apache-2.0"
 
 [features]
 default = ["derive"]
@@ -14,9 +14,14 @@ facet = ["bytecast/facet"]
 rkyv = ["bytecast/rkyv"]
 
 [dependencies]
-bytecast = { path = "../bytecast", default-features = false, features = ["alloc", "derive"] }
-hashbrown = "0.16"
-abmac-macros = { path = "../abmac-macros", default-features = false, features = ["pebble"], optional = true }
+bytecast = { path = "../bytecast", default-features = false, features = [
+  "alloc",
+  "derive",
+] }
+hashbrown = "0.16.1"
+abmac-macros = { path = "../abmac-macros", default-features = false, features = [
+  "pebble",
+], optional = true }
 spill-ring = { path = "../spill-ring", default-features = false }
 spout = { path = "../spout" }
 verdict = { path = "../verdict", default-features = false }
@@ -36,5 +41,5 @@ name = "pebble_rebuild"
 name = "pebble_branching"
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

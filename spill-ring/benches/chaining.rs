@@ -107,7 +107,8 @@ fn chaining_collect(c: &mut Criterion) {
     // Single ring -> CollectSpout — push(&self) to match chained path
     group.bench_function("single_64_collect", |b| {
         b.iter(|| {
-            let ring: SpillRing<u64, 64, _> = SpillRing::builder().spout(CollectSpout::new()).build();
+            let ring: SpillRing<u64, 64, _> =
+                SpillRing::builder().spout(CollectSpout::new()).build();
             for i in 0..iterations {
                 ring.push(black_box(i));
             }
@@ -118,7 +119,8 @@ fn chaining_collect(c: &mut Criterion) {
     // Chained: ring1(32) -> ring2(32) -> CollectSpout
     group.bench_function("chained_32_32_collect", |b| {
         b.iter(|| {
-            let ring2: SpillRing<u64, 32, _> = SpillRing::builder().spout(CollectSpout::new()).build();
+            let ring2: SpillRing<u64, 32, _> =
+                SpillRing::builder().spout(CollectSpout::new()).build();
             let ring1 = SpillRing::<u64, 32, _>::builder().spout(ring2).build();
             for i in 0..iterations {
                 ring1.push(black_box(i));
@@ -217,7 +219,9 @@ fn batch_reduce_spouts(c: &mut Criterion) {
             let r4: SpillRing<Vec<u64>, 16, DropSpout> = SpillRing::new();
             let r3 = SpillRing::<Vec<u64>, 16, _>::builder().spout(r4).build();
             let batch_spout: BatchSpout<u64, _> = BatchSpout::new(100, r3);
-            let r2 = SpillRing::<u64, 16, _>::builder().spout(batch_spout).build();
+            let r2 = SpillRing::<u64, 16, _>::builder()
+                .spout(batch_spout)
+                .build();
             let r1 = SpillRing::<u64, 16, _>::builder().spout(r2).build();
             for i in 0..iterations {
                 r1.push(black_box(i));

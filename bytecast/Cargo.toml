@@ -12,16 +12,27 @@ keywords = ["bytes", "serialization", "little-endian", "no_std", "embedded"]
 categories = ["encoding", "no-std", "embedded"]
 
 [dependencies]
-abmac-macros = { path = "../abmac-macros", default-features = false, features = ["bytecast"], optional = true }
-serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
-base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
-facet = { version = "0.43", default-features = false, features = ["alloc"], optional = true }
-rkyv = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+abmac-macros = { path = "../abmac-macros", default-features = false, features = [
+  "bytecast",
+], optional = true }
+serde = { version = "1.0.228", default-features = false, features = [
+  "derive",
+  "alloc",
+], optional = true }
+base64 = { version = "0.22.1", default-features = false, features = [
+  "alloc",
+], optional = true }
+facet = { version = "0.43.2", default-features = false, features = [
+  "alloc",
+], optional = true }
+rkyv = { version = "0.8.15", default-features = false, features = [
+  "alloc",
+], optional = true }
 
 [dev-dependencies]
-serde_json = "1"
-facet-json = "0.43"
-rkyv = { version = "0.8", features = ["bytecheck"] }
+serde_json = "1.0.149"
+facet-json = "0.43.2"
+rkyv = { version = "0.8.15", features = ["bytecheck"] }
 
 [features]
 std = ["alloc"]

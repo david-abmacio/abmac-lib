@@ -528,12 +528,14 @@ where
                 .map(|n| n.dependencies())
                 .unwrap_or(&[]);
             self.manifest.record(id, deps)?;
-            self.cold
-                .store(id, checkpoint)
-                .map_err(|e| PebbleManagerError::Serialization {
+            if let Err(e) = self.cold.store(id, checkpoint) {
+                // Compensating tombstone for the write-ahead manifest entry.
+                self.manifest.record_tombstone(id);
+                return Err(PebbleManagerError::Serialization {
                     state_id: id,
                     source: e,
-                })?;
+                });
+            }
             self.io_writes = self.io_writes.saturating_add(1);
         }
 
@@ -732,12 +734,16 @@ where
             .map(|n| n.dependencies())
             .unwrap_or(&[]);
         self.manifest.record(id, deps)?;
-        self.cold
-            .store(id, checkpoint)
-            .map_err(|e| PebbleManagerError::Serialization {
+        if let Err(e) = self.cold.store(id, checkpoint) {
+            // Cold store failed after the write-ahead manifest entry.
+            // Append a compensating tombstone so recovery doesn't think
+            // this checkpoint is in cold storage.
+            self.manifest.record_tombstone(id);
+            return Err(PebbleManagerError::Serialization {
                 state_id: id,
                 source: e,
-            })?;
+            });
+        }
         self.io_writes = self.io_writes.saturating_add(1);
         Ok(())
     }

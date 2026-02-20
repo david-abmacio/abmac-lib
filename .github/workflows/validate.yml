@@ -1,0 +1,130 @@
+name: Validate
+
+on:
+  push:
+    branches: '*'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------
+  # Fast checks that fail early
+  # ---------------------------------------------------------
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Install Rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Install Clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-features --all-targets --keep-going -- -D warnings --allow unused
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+      - name: Run Tests
+        run: cargo test --workspace --all-features
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Run security audit
+        uses: actions-rust-lang/audit@v1
+
+  deny:
+    name: Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Check dependencies
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          log-level: warn
+          command: check
+          arguments: --all-features
+  # ---------------------------------------------------------
+  # Dependency Review (GitHub-native security check)
+  #
+  # WHAT THIS ADDS:
+  # - Analyzes dependency changes *in the PR diff*.
+  # - Warns if the PR adds a vulnerable dependency.
+  # - Warns if the PR downgrades to a vulnerable version.
+  # - Warns if the PR adds a dependency from a suspicious
+  #   source (e.g., git repo instead of crates.io).
+  # - Warns about license issues using GitHub’s metadata.
+  #
+  # WHAT IT DOES *NOT* DO:
+  # - Does NOT replace cargo-audit or cargo-deny.
+  # - Does NOT add new Rust vulnerability intelligence.
+  #
+  # WHEN IT’S USEFUL:
+  # - When multiple contributors are involved.
+  # - When reviewing dependency bumps in PRs.
+  # - When you want GitHub-native PR comments.
+  # - This adds visibility into *what changed* in the PR.
+  # ---------------------------------------------------------
+  dependency-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+    # ---------------------------------------------------------
+  # Workflow Linting (actionlint)
+  #
+  # WHAT THIS ADDS:
+  # - Static analysis of your GitHub Actions workflows.
+  # - Detects YAML errors and invalid syntax.
+  # - Detects unpinned or unsafe action usage.
+  # - Detects bad shell usage (via shellcheck).
+  # - Ensures workflow correctness before running CI.
+  # - catches subtle workflow bugs.
+  # - Especially valuable as workflows grow more complex.
+  # ---------------------------------------------------------
+  workflow-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/actionlint@v1
+            

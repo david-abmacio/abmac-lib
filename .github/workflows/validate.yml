@@ -101,7 +101,9 @@ jobs:
   # - This adds visibility into *what changed* in the PR.
   # ---------------------------------------------------------
   dependency-review:
+    name: Dependency Review
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
       pull-requests: write
@@ -121,10 +123,10 @@ jobs:
   # - Especially valuable as workflows grow more complex.
   # ---------------------------------------------------------
   workflow-lint:
+    name: Workflow Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: rhysd/actionlint@v1
-            
+      - uses: rhysd/actionlint@v1.6.27           
